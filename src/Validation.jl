@@ -1,7 +1,7 @@
 module Validation
 using DataPipes, SplitApplyCombine, TypedTables, Statistics, CSV
 import Base: sort
-export read_data, qc_report, ap_report, recovery_report, stability_report, flatten_stability, flatten_ap
+export read_data, qc_report, ap_report, recovery_report, stability_report, flatten_stability, flatten_ap, flatten_recovery
 
 function read_data(file)
     t = Vector{Vector{String}}(undef, 2)
@@ -27,7 +27,7 @@ rsd(v) = std(v) / mean(v) * 100
 
 apply(fs, x...) = [f(x...) for f in fs]
 
-function qc_report(tbl::Table; id = r"PooledQC", type = "Final Conc.", stats = [mean, rsd])
+function qc_report(tbl::Table; id = r"PooledQC", type = "Final Conc.", stats = [mean, std, rsd])
     cols = propertynames(tbl)
     qc = @p tbl filter(occursin(id, getproperty(_, cols[1]))) filter(==(type, getproperty(_, cols[2]))) Table
     cols = propertynames(qc)[3:end]
@@ -48,19 +48,23 @@ function ap_report(tbls::Table...; id = r"Pre.*_(.*)_.*", type = "Accuracy")
     vars = @p gtbls mapreduce(map(x -> map(var, x), _), fmap(vcat)) map(Table)
     accuracy = @p accuracies map(map(mean, columns(_)))
     var_intra = @p vars map(map(mean, columns(_)))
-    rsds = fmap(Table ∘ (fmap ^ 2)(f_rsd))(vars, accuracies)
+    std_intra = @p var_intra map(map(sqrt, _))
+    rsds = fmap(Table ∘ (fmap ∘ fmap)(f_rsd))(vars, accuracies)
+    stds = fmap(Table ∘ (fmap ∘ fmap)(f_std))(vars)
     var_bet = @p accuracies map(map(var, columns(_)))
-    var_inter = (fmap ^ 2)(f_var_inter)(var_bet, var_intra, ns)
-    repeatability = (fmap ^ 2)(f_rsd)(var_intra, accuracy)
-    reproducibility = (fmap ^ 2)(f_rsd)(var_inter, var_intra, accuracy)
-    stats = ["Accuracy", "Intraday variance", "\"Betweenday\" variance", "Interday variance", "Repeatability", "Reproducibility"]
+    std_bet = @p var_bet map(map(sqrt, _))
+    var_inter = (fmap ∘ fmap)(f_var_inter)(var_bet, var_intra, ns)
+    std_inter = @p var_inter map(map(sqrt, _))
+    repeatability = (fmap ∘ fmap)(f_rsd)(var_intra, accuracy)
+    reproducibility = (fmap ∘ fmap)(f_rsd)(var_inter, var_intra, accuracy)
+    stats = ["Accuracy", "Intraday standard deviation", "Intraday variance", "\"Betweenday\" standard deviation", "\"Betweenday\" variance", "Interday standard deviation", "Interday variance", "Repeatability", "Reproducibility"]
     (
-        daily = (accuracy = accuracies, rsd = rsds), 
-        final = fmap((x -> Table((Stats = stats, ), x)) ∘ fmap(vcat))(accuracy, var_intra, var_bet, var_inter, repeatability, reproducibility)
+        daily = (accuracy = accuracies, std = stds, rsd = rsds, var = vars), 
+        final = fmap((x -> Table((Stats = stats, ), x)) ∘ fmap(vcat))(accuracy, std_intra, var_intra, std_bet, var_bet, std_inter, var_inter, repeatability, reproducibility)
     )
 end
 
-function recovery_report(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.", stats = [mean, rsd])
+function recovery_report(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.", stats = [mean, std, rsd])
     cols = propertynames(tbl)
     df = @p tbl filter(==(type, getproperty(_, cols[2]))) 
     pre_tbl = @p df filter(occursin(pre, getproperty(_, cols[1]))) Table
@@ -70,9 +74,19 @@ function recovery_report(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*
     getproperty(post_tbl, level) .= getindex.(match.(post, getproperty(post_tbl, level)), 1)
     pre_tbls = @p pre_tbl group(getproperty(level)) map(getproperties(_, propertynames(pre_tbl)[3:end])) map(columns)
     post_tbls = @p post_tbl group(getproperty(level)) map(getproperties(_, propertynames(post_tbl)[3:end])) map(columns)
-    pre_report = @p pre_tbls map(Table ∘ fmap(x -> apply(stats, x)))
-    post_report = @p post_tbls map(Table ∘ fmap(x -> apply(stats, x)))
-    map((x, y) -> Table((Stats = ["recovery", "rsd"], ), Table(fmap(map)([/, std_sum], x, y))), pre_report, post_report)
+    pre_report = @p pre_tbls map(Table ∘ fmap(x -> apply([mean, rsd], x)))
+    post_report = @p post_tbls map(Table ∘ fmap(x -> apply([mean, rsd], x)))
+    report = map((x, y) -> Table((Stats = ["Recovery", "RSD"], ), Table(fmap(map)([/, std_sum], x, y))), pre_report, post_report)
+    for level in report
+        drugs = @p level propertynames collect
+        insert!(getproperty(level, drugs[1]), 2, "standard deviation")
+        popfirst!(drugs)
+        for drug in drugs
+            dt = getproperty(level, drug)
+            insert!(dt, 2, dt[1] * dt[2])
+        end
+    end
+    report
 end
 
 function stability_report(tbl::Table; d0 = r"S.*_(.*)_.*", days = r"S.*_(.*)_(.*)_(.*)_.*", order = "TDL", type = "Accuracy")
@@ -92,7 +106,7 @@ function stability_report(tbl::Table; d0 = r"S.*_(.*)_.*", days = r"S.*_(.*)_(.*
     ndays = @p stability_tbl.D unique
     pushfirst!(ndays, 0)
     d0_gtbl = @p d0_tbl filter(in(getproperty(_, level), ls)) group(getproperty(level)) map((columns ∘ getproperties)(_, cols[3:end]))
-    gtbl = @p stability_tbl group(getproperty(:T)) map(group(getproperty(:L), _)) map(map(x -> group(getproperty(:D), x), _)) map((fmap ^ 2)(getproperties(propertynames(stability_tbl)[3:end - 3])))
+    gtbl = @p stability_tbl group(getproperty(:T)) map(group(getproperty(:L), _)) map(map(x -> group(getproperty(:D), x), _)) map((fmap ∘ fmap)(getproperties(propertynames(stability_tbl)[3:end - 3])))
     d0_accuracy = @p d0_gtbl map(fmap(mean))
     d0_rsd = @p d0_gtbl map(fmap(rsd))
     accuracy = @p gtbl map(fmap((x -> Table((Days = ndays, ), x)) ∘ vcat_fmap2_table_skip1(mean))(d0_accuracy , _))
@@ -113,6 +127,7 @@ applyer(f) = (x...) -> f(x)
 fmap(f) = (x...) -> map(f, x...)
 
 f_var_inter(var_bet, var_intra, inv_n) = max(var_bet - var_intra * inv_n, 0)
+f_std(vars) = sqrt(vars)
 f_rsd(vars, means) = sqrt(vars) / means * 100
 f_rsd(var1, var2, means) = sqrt(var1 + var2) / means * 100
 std_sum(x, y) = sqrt(x^2 + y^2)
@@ -142,7 +157,26 @@ function flatten_stability(data::NamedTuple)
     Table(; new...)
 end
 
-function flatten_ap(data::TypedTables.Dictionary)
+function flatten_ap(data::NamedTuple)
+    levels = @p data.final keys collect
+    ndays = size(getindex(data.daily.accuracy, levels[1]), 1)
+    stats = vcat([["Accuracy($i)", "standard deviation($i)", "RSD($i)"] for i in 1:ndays]..., getindex(data.final, levels[1]).Stats)
+    new = Pair{Symbol, Any}[:Stats => stats]
+    drugs = @p getindex(data.final, levels[1]) propertynames collect
+    popfirst!(drugs)
+    for drug in drugs
+        for level in levels
+            daily_acc = getproperty(data.daily.accuracy[level], drug)
+            daily_std = getproperty(data.daily.std[level], drug)
+            daily_rsd = getproperty(data.daily.rsd[level], drug)
+            stat = vcat([[daily_acc[i], daily_std[i], daily_rsd[i]] for i in 1:ndays]..., getproperty(getindex(data.final, level), drug))
+            push!(new, Symbol(string(drug) * "_" * level) => stat)
+        end
+    end
+    Table(; new...)
+end
+
+function flatten_recovery(data::TypedTables.Dictionary)
     levels = @p data keys collect
     new = Pair{Symbol, Any}[:Stats => getindex(data, levels[1]).Stats]
     drugs = @p getindex(data, levels[1]) propertynames collect

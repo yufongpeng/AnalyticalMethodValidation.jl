@@ -1,7 +1,7 @@
 name = "Validation"
 uuid = "b401a7b7-5953-49f1-86ca-9d186498acee"
 authors = ["Yu-Fong Peng <sciphypar@gmail.com>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
@@ -11,11 +11,10 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 TypedTables = "9d95f2ec-7b3d-5a63-8d20-e2491e220bb9"
 
 [compat]
-julia = "1"
 CSV = "0.10"
 DataPipes = "0.3"
 SplitApplyCombine = "1"
-TypedTables = "1"
+julia = "1"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
