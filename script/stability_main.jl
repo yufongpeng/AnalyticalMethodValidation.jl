@@ -46,15 +46,15 @@ function main()
         
         Swithces (a '*' marks the default value)
             -h                                  Print this message
-            -d0 {"S.*_(.*)_.*"*}                Set the identifier for the day 0 samples; this will be wrapped in `Regex`. The concentration level is captured in the identifier
-            -d {"S.*_(.*)_(.*)_(.*)_.*"*}       Set the identifier for the stability samples; this will be wrapped in `Regex`. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by -occursin
+            -d0 {"S.*_(.*)_.*"*}                Set the identifier for the day0 samples; this will be wrapped in `Regex`. The concentration level is captured in the identifier
+            -d {"S.*_(.*)_(.*)_(.*)_.*"*}       Set the identifier for the stability samples; this will be wrapped in `Regex`. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by -o
             -o {TDL*}                           Set the order of captured values from -d identifiers; T is temperature (storage condition); D is storage days; L is concentration level
             -t {Accuracy|"Final Conc."*|Area}   Set the quantification value type
             -s {stability.csv*}                 Set the ouput file
         """)
         return
     end
-    stability = stability_report(reduce(append!, read_data.(input)); d0, days, order, type)
+    stability = StabilityData(reduce(append!, read_data.(input)); d0, days, order, type)
     for temp in keys(stability.accuracy)
         printstyled("Temperature ", temp, color = :blue)
         println()
@@ -76,7 +76,7 @@ function main()
         filename = join([name, "($i).csv"], "")
         file = joinpath(dir, filename)
     end
-    CSV.write(file, flatten_stability(stability))
+    CSV.write(file, Report(stability))
 end
 
 (@__MODULE__() == Main) && main()

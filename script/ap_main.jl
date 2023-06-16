@@ -44,8 +44,8 @@ function main()
         """)
         return
     end
-    ap = ap_report(read_data.(input)...; id, type)
-    level = keys(ap.final)
+    ap = APData(read_data.(input)...; id, type)
+    level = keys(ap.summary)
     printstyled("Daily: ", color = :blue)
     println()
     for k in level
@@ -58,8 +58,8 @@ function main()
     println()
     for k in level
         printstyled("Level ", k, "\n", color = :green)
-        display(ap.final[k])
-        println()   
+        display(ap.summary[k])
+        println()
     end
     i = 0
     file = output
@@ -72,7 +72,7 @@ function main()
         filename = join([name, "($i).csv"], "")
         file = joinpath(dir, filename)
     end
-    CSV.write(file, flatten_ap(ap))
+    CSV.write(file, Report(ap))
 end
 
 (@__MODULE__() == Main) && main()

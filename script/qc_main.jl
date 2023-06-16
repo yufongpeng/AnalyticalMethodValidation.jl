@@ -40,7 +40,7 @@ function main()
         """)
         return
     end
-    qc = qc_report(reduce(append!, read_data.(input)); id, type)
+    qc = QCReport(reduce(append!, read_data.(input)); id, type)
     display(qc)
     println()
     i = 0
@@ -54,7 +54,7 @@ function main()
         filename = join([name, "($i).csv"], "")
         file = joinpath(dir, filename)
     end
-    CSV.write(file, qc)
+    CSV.write(file, qc.report)
 end
 
 (@__MODULE__() == Main) && main()

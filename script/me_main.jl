@@ -1,10 +1,10 @@
 using Validation, CSV
 
 global input = String[]
-global pre = r"Pre.*_(.*)_.*"
-global post = r"Post.*_(.*)_.*"
+global matrix = r"Pre.*_(.*)_.*"
+global stds = r"Post.*_(.*)_.*"
 global type = "Final Conc."
-global output = "recovery.csv"
+global output = "me.csv"
 global help = false
 
 let i = 0
@@ -13,12 +13,12 @@ let i = 0
         if ARGS[i] == "-h"
             global help = true
             break
-        elseif  ARGS[i] == "-pre"
+        elseif  ARGS[i] == "-matrix"
             i += 1
-            global pre = Regex(ARGS[i])
-        elseif ARGS[i] == "-post"
+            global matrix = Regex(ARGS[i])
+        elseif ARGS[i] == "-stds"
             i += 1
-            global post = Regex(ARGS[i])
+            global stds = Regex(ARGS[i])
         elseif ARGS == "-t"
             global type = ARGS[i]
         elseif ARGS[i] == "-s"
@@ -37,22 +37,22 @@ function main()
         println(stdout, 
         """
 
-            julia [julia switches] -- recovery_main.jl [swithes] [input files]
+            julia [julia switches] -- me_main.jl [swithes] [input files]
         
         Swithces (a '*' marks the default value)
             -h                                  Print this message
-            -pre {"Pre.*_(.*)_.*"*}             Set the identifier for the prespiked samples; this will be wrapped in `Regex`.
-            -post {"Post.*_(.*)_.*"*}           Set the identifier for the postspiked samples; this will be wrapped in `Regex`.
+            -matrix {"Pre.*_(.*)_.*"*}          Set the identifier for the samples; this will be wrapped in `Regex`.
+            -stds {"Post.*_(.*)_.*"*}           Set the identifier for the standard solutions; this will be wrapped in `Regex`.
             -t {Accuracy|"Final Conc."*|Area}   Set the quantification value type
-            -s {recovery.csv*}                  Set the ouput file
+            -s {me.csv*}                        Set the ouput file
         """)
         return
     end
-    recovery = RecoveryData(reduce(append!, read_data.(input)); pre, post, type)
-    level = keys(recovery.data)
+    me = MEData(reduce(append!, read_data.(input)); matrix, stds, type)
+    level = keys(me.data)
     for k in level
         printstyled("Level ", k, "\n", color = :green)
-        display(recovery.data[k])
+        display(me.data[k])
         println()
     end
     i = 0
@@ -66,7 +66,7 @@ function main()
         filename = join([name, "($i).csv"], "")
         file = joinpath(dir, filename)
     end
-    CSV.write(file, Report(recovery.data))
+    CSV.write(file, Report(me.data))
 end
 
 (@__MODULE__() == Main) && main()
