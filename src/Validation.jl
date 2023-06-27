@@ -112,7 +112,7 @@ A type for stability results.
 """
 struct StabilityData <: Data
     accuracy::TypedTables.Dictionary
-    rsd::TypedTables.Dictionary
+    std::TypedTables.Dictionary
 end
 
 """

@@ -18,3 +18,4 @@ f_std(vars) = sqrt(vars)
 f_rsd(vars, means) = sqrt(vars) / means * 100
 f_rsd(var1, var2, means) = sqrt(var1 + var2) / means * 100
 std_sum(x, y) = sqrt(x^2 + y^2)
+pct_ratio(x, y) = x / y * 100

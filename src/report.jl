@@ -75,7 +75,7 @@ function ratio_data(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*"
     post_tbls = @p post_tbl group(getproperty(level)) map(getproperties(_, propertynames(post_tbl)[3:end])) map(columns)
     pre_report = @p pre_tbls map(Table ∘ fmap(x -> apply([mean, rsd], x)))
     post_report = @p post_tbls map(Table ∘ fmap(x -> apply([mean, rsd], x)))
-    report = map((x, y) -> Table((Stats = ["Recovery", "RSD"], ), Table(fmap(map)([/, std_sum], x, y))), pre_report, post_report)
+    report = map((x, y) -> Table((Stats = ["Recovery", "RSD"], ), Table(fmap(map)([pct_ratio, std_sum], x, y))), pre_report, post_report)
     for level in report
         drugs = @p level propertynames collect
         insert!(getproperty(level, drugs[1]), 2, "standard deviation")
@@ -119,10 +119,10 @@ function StabilityData(tbl::Table; d0 = r"S.*_(.*)_.*", days = r"S.*_(.*)_(.*)_(
     d0_gtbl = @p d0_tbl filter(in(getproperty(_, level), ls)) group(getproperty(level)) map((columns ∘ getproperties)(_, cols[3:end]))
     gtbl = @p stability_tbl group(getproperty(:T)) map(group(getproperty(:L), _)) map(map(x -> group(getproperty(:D), x), _)) map((fmap ∘ fmap)(getproperties(propertynames(stability_tbl)[3:end - 3])))
     d0_accuracy = @p d0_gtbl map(fmap(mean))
-    d0_rsd = @p d0_gtbl map(fmap(rsd))
+    d0_std = @p d0_gtbl map(fmap(std))
     accuracy = @p gtbl map(fmap((x -> Table((Days = ndays, ), x)) ∘ vcat_fmap2_table_skip1(mean))(d0_accuracy , _))
-    rsds = @p gtbl map(fmap((x -> Table((Days = ndays, ), x)) ∘ vcat_fmap2_table_skip1(rsd))(d0_rsd , _))
-    StabilityData(accuracy, rsds)
+    stds = @p gtbl map(fmap((x -> Table((Days = ndays, ), x)) ∘ vcat_fmap2_table_skip1(std))(d0_std , _))
+    StabilityData(accuracy, stds)
 end
 
 """
@@ -131,7 +131,7 @@ end
 Create `Report` from `Data`
 """
 function Report(data::StabilityData)
-    nt = map((accuracy = data.accuracy, rsd = data.rsd)) do dt
+    nt = map((accuracy = data.accuracy, std = data.std)) do dt
         mapreduce(vcat, pairs(dt)) do (temp, tbl)
             levels = @p tbl keys collect
             new = Pair{Symbol, Any}[:Days => getindex(tbl, levels[1]).Days]
@@ -150,7 +150,7 @@ function Report(data::StabilityData)
     cols = cols[3:end]
     for col in cols
         push!(new, Symbol(string(col) * "_" * "acc") => getproperty(nt.accuracy, col))
-        push!(new, Symbol(string(col) * "_" * "rsd") => getproperty(nt.rsd, col))
+        push!(new, Symbol(string(col) * "_" * "std") => getproperty(nt.std, col))
     end
     Report(data, Table(; new...))
 end
