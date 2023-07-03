@@ -1,192 +1,215 @@
 """
-    APData(tbls::Table...; id = r"Pre.*_(.*)_.*", type = "Accuracy")
+    qc_report(df::DataFrame; id = r"PooledQC", type = "Final Conc.", stats = [mean, std, rsd], names = ["Mean", "Standard Deviation", "Relative Standard Deviation"])
 
-Create `APData` from multiple tables.
+Compute statistics of QC data.
 
 # Arguments
-* `tbls`: each table should contain data of one day.
-* `id`: `Regex` identifier for the AP experiment samples. The concentration level is captured in the identifier.
+* `df`: a `DataFrame`.
+* `id`: `Regex` identifier for the QC samples.
 * `type`: quantification value type.
+* `stats`: statistics functions.
+* `names`: names of statistics. When `nothing` is given, `stats` is served as `names`.
 """
-function APData(tbls::Table...; id = r"Pre.*_(.*)_.*", type = "Accuracy")
-    gtbls = map(tbls) do tbl
-        cols = propertynames(tbl)
-        ap = @p tbl filter(occursin(id, getproperty(_, cols[1]))) filter(==(type, getproperty(_, cols[2]))) Table
-        level = cols[1]
-        getproperty(ap, level) .= getindex.(match.(id, getproperty(ap, level)), 1)
-        ap = @p ap group(getproperty(level)) map(getproperties(_, propertynames(ap)[3:end])) map(columns)
-    end
-    ns = @p gtbls mapreduce(map(x -> map(y -> 1 / length(y), x), _), fmap(vcat)) map(Table) map(map(mean, columns(_)))
-    accuracies = @p gtbls mapreduce(map(x -> map(mean, x), _), fmap(vcat)) map(Table)
-    vars = @p gtbls mapreduce(map(x -> map(var, x), _), fmap(vcat)) map(Table)
-    accuracy = @p accuracies map(map(mean, columns(_)))
-    var_intra = @p vars map(map(mean, columns(_)))
-    std_intra = @p var_intra map(map(sqrt, _))
-    rsds = fmap(Table ∘ (fmap ∘ fmap)(f_rsd))(vars, accuracies)
-    stds = fmap(Table ∘ (fmap ∘ fmap)(f_std))(vars)
-    var_bet = @p accuracies map(map(var, columns(_)))
-    std_bet = @p var_bet map(map(sqrt, _))
-    var_inter = (fmap ∘ fmap)(f_var_inter)(var_bet, var_intra, ns)
-    std_inter = @p var_inter map(map(sqrt, _))
-    repeatability = (fmap ∘ fmap)(f_rsd)(var_intra, accuracy)
-    reproducibility = (fmap ∘ fmap)(f_rsd)(var_inter, var_intra, accuracy)
-    stats = ["Accuracy", "Intraday standard deviation", "Intraday variance", "\"Betweenday\" standard deviation", "\"Betweenday\" variance", "Interday standard deviation", "Interday variance", "Repeatability", "Reproducibility"]
-    APData(
-        (accuracy = accuracies, std = stds, rsd = rsds, var = vars), 
-        fmap((x -> Table((Stats = stats, ), x)) ∘ fmap(vcat))(accuracy, std_intra, var_intra, std_bet, var_bet, std_inter, var_inter, repeatability, reproducibility)
-    )
+function qc_report(df::DataFrame; id = r"PooledQC", type = "Final Conc.", stats = [mean, std, rsd], names = ["Mean", "Standard Deviation", "Relative Standard Deviation"])
+    cols = propertynames(df)
+    qc = @p df filter(cols[1] => Base.Fix1(occursin, id)) filter(cols[2] => ==(type))
+    qc = stack(qc, cols[3:end], cols[1]; variable_name = :Drug, value_name = :Data)
+    select!(qc, [:Drug, :Data])
+    report = combine(groupby(qc, :Drug), :Data => x -> vcat(apply(stats, x)...); renamecols = false)
+    names = isnothing(names) ? stats : names
+    insertcols!(report, 2, :Stats => repeat(repr.(names); outer = size(report, 1) ÷ length(stats)))
+    sort!(report, :Drug)
 end
 
 """
-    MEData(tbl::Table; matrix = r"Post.*_(.*)_.*", stds = r"STD.*_(.*)_.*", type = "Area")
+    sample_report(df::DataFrame; id = r"Sample_(\\d*).*", type = "Final Conc.")
 
-Create `MEData` from a table.
+Compute mean of sample data.
 
 # Arguments
-* `tbl`: a `Table`.
+* `df`: a `DataFrame`.
+* `id`: `Regex` identifier for the QC samples.
+* `type`: quantification value type.
+"""
+function sample_report(df::DataFrame; id = r"Sample_(\d*).*", type = "Final Conc.")
+    cols = propertynames(df)
+    sample = @p df filter(cols[1] => Base.Fix1(occursin, id)) filter(cols[2] => ==(type))
+    sample[:, cols[1]] = map(x -> match(id, x)[1], sample[!, cols[1]])
+    sample = stack(sample, cols[3:end], cols[1]; variable_name = :Drug, value_name = :Data)
+    select!(sample, [cols[1], :Drug, :Data])
+    combine(groupby(sample, [cols[1], :Drug]), :Data => mean; renamecols = false)
+end
+
+"""
+    ap_report(df::DataFrame; id = r"Pre.*_(.*)_.*", type = "Accuracy")
+
+Compute accuracy and precision.
+
+# Arguments
+* `df`: a `DataFrame`.
+* `id`: `Regex` identifier for the AP experiment samples. The day and concentration level is captured in the identifier; the order can be set by `order`.
+* `order`: a string for setting the order of captured values from `id`; D is day; L is concentration level.
+* `type`: quantification value type.
+"""
+function ap_report(df::DataFrame; id = r"Pre(.*)_(.*)_.*", order = "DL", type = "Accuracy")
+    cols = propertynames(df)
+    datatype = cols[2]
+    level = cols[1]
+    drugs = cols[3:end]
+    df = filter(datatype => ==(type), df)
+    ap_df = filter(level => Base.Fix1(occursin, id), df)
+    insertcols!(ap_df, 1, (Symbol.(split(order, "")) .=> map(1:length(order)) do i 
+        getindex.(match.(id, ap_df[!, level]), i)
+    end
+    )...)
+    select!(ap_df, Not([datatype, level]))
+    ap_df[!, :D] .= @p ap_df.D map(parse(Int, _))
+    ap_df = stack(ap_df, drugs, [:L, :D]; variable_name = :Drug, value_name = :Data)
+    gdf1 = groupby(ap_df, [:Drug, :L, :D])
+    gdf2 = groupby(combine(gdf1, :Data .=> length; renamecols = false), [:Drug, :L])
+    ns = combine(gdf2, :Data => mean; renamecols = false)
+    accuracies = combine(gdf1, :Data => mean; renamecols = false)
+    stds = combine(gdf1, :Data => std; renamecols = false)
+    vars = combine(gdf1, :Data => var; renamecols = false)
+    accuracy = combine(groupby(accuracies, [:Drug, :L]), :Data => mean; renamecols = false)
+    var_intra = combine(groupby(vars, [:Drug, :L]), :Data => mean; renamecols = false)
+    var_bet = combine(groupby(accuracies, [:Drug, :L]), :Data => var; renamecols = false)
+    var_inter = deepcopy(accuracy)
+    var_inter[:, :Data] = @. f_var_inter(getproperty([var_bet, var_intra, ns], :Data)...)
+    reproducibility = deepcopy(accuracy)
+    reproducibility[:, :Data] = @. f_var_sum_pct(getproperty([var_intra, var_inter, reproducibility], :Data)...)
+    std_intra = transform!(var_intra, :Data => ByRow(sqrt); renamecols = false)
+    std_bet = transform!(var_bet, :Data => ByRow(sqrt); renamecols = false)
+    std_inter = transform!(var_inter, :Data => ByRow(sqrt); renamecols = false)
+    repeatability = deepcopy(accuracy)
+    repeatability[:, :Data] = @. ratio_pct(getproperty([std_intra, repeatability], :Data)...)
+    insertcols!(accuracies, :Stats => :Accuracy)
+    insertcols!(stds, :Stats => "Standard Deviation")
+    insertcols!(accuracy, :Stats => "Accuracy")
+    insertcols!(std_intra, :Stats => "Intraday Standard Deviation")
+    insertcols!(std_bet, :Stats => "Betweenday Standard Deviation")
+    insertcols!(std_inter, :Stats => "Interday Standard Deviation")
+    insertcols!(repeatability, :Stats => "Repeatability")
+    insertcols!(reproducibility, :Stats => "Reproducibility")
+
+    daily = vcat(accuracies, stds)
+    select!(daily, [:Drug, :L, :D, :Stats, :Data])
+    sort!(daily, [:Drug, :L, :D])
+    summary = vcat(std_intra, accuracy, std_bet, std_inter, repeatability, reproducibility)
+    select!(summary, [:Drug, :L, :Stats, :Data])
+    sort!(summary, [:Drug, :L])
+    (; daily, summary)
+end
+
+"""
+    me_report(df::DataFrame; matrix = r"Post.*_(.*)_.*", stds = r"STD.*_(.*)_.*", type = "Area")
+
+Compute matrix effects.
+
+# Arguments
+* `df`: a `DataFrame`.
 * `matrix`: `Regex` identifier for samples with matrix. The concentration level is captured in the identifier.
 * `stds`: `Regex` identifier for standard solution. The concentration level is captured in the identifier.
 * `type`: quantification value type.
 """
-MEData(tbl::Table; matrix = r"Post.*_(.*)_.*", stds = r"STD.*_(.*)_.*", type = "Area") = ratio_data(tbl; type, pre = matrix, post = stds) |> MEData
+function me_report(df::DataFrame; matrix = r"Post.*_(.*)_.*", stds = r"STD.*_(.*)_.*", type = "Area")
+    df = ratio_data(df; type, pre = matrix, post = stds)
+    replace!(df.Stats, "Ratio" => "Matrix Effect")
+    df
+end
 
 """
-    RecoveryData(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.")
+    recovery_report(df::DataFrame; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.")
 
-Create `RecoveryData` from a table.
+Compute recovery.
 
 # Arguments
-* `tbl`: a `Table`.
+* `df`: a `DataFrame`.
 * `pre`: `Regex` identifier for prespiked samples. The concentration level is captured in the identifier.
 * `post`: `Regex` identifier for postspiked samples. The concentration level is captured in the identifier.
 * `type`: quantification value type.
 """
-RecoveryData(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.") = ratio_data(tbl; type, pre, post) |> RecoveryData
+function recovery_report(df::DataFrame; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.")
+    df = ratio_data(df; type, pre, post)
+    replace!(df.Stats, "Ratio" => "Recovery")
+    df
+end
 
-function ratio_data(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.")
-    cols = propertynames(tbl)
-    df = @p tbl filter(==(type, getproperty(_, cols[2]))) 
-    pre_tbl = @p df filter(occursin(pre, getproperty(_, cols[1]))) Table
-    post_tbl = @p df filter(occursin(post, getproperty(_, cols[1]))) Table
+function ratio_data(df::DataFrame; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.")
+    cols = propertynames(df)
+    datatype = cols[2]
     level = cols[1]
-    getproperty(pre_tbl, level) .= getindex.(match.(pre, getproperty(pre_tbl, level)), 1)
-    getproperty(post_tbl, level) .= getindex.(match.(post, getproperty(post_tbl, level)), 1)
-    pre_tbls = @p pre_tbl group(getproperty(level)) map(getproperties(_, propertynames(pre_tbl)[3:end])) map(columns)
-    post_tbls = @p post_tbl group(getproperty(level)) map(getproperties(_, propertynames(post_tbl)[3:end])) map(columns)
-    pre_report = @p pre_tbls map(Table ∘ fmap(x -> apply([mean, rsd], x)))
-    post_report = @p post_tbls map(Table ∘ fmap(x -> apply([mean, rsd], x)))
-    report = map((x, y) -> Table((Stats = ["Recovery", "RSD"], ), Table(fmap(map)([pct_ratio, std_sum], x, y))), pre_report, post_report)
-    for level in report
-        drugs = @p level propertynames collect
-        insert!(getproperty(level, drugs[1]), 2, "standard deviation")
-        popfirst!(drugs)
-        for drug in drugs
-            dt = getproperty(level, drug)
-            insert!(dt, 2, dt[1] * dt[2])
-        end
-    end
-    report
+    drugs = cols[3:end]
+    df = filter(datatype => ==(type), df)
+    df = stack(df, drugs, level; variable_name = :Drug, value_name = :Data)
+    rename!(df, Dict(level => :L))
+    pre_df = filter(:L => Base.Fix1(occursin, pre), df)
+    post_df = filter(:L => Base.Fix1(occursin, post), df)
+    pre_df[:, :L] = getindex.(match.(pre, pre_df[!, :L]), 1)
+    post_df[:, :L] = getindex.(match.(post, post_df[!, :L]), 1)
+    sort!(pre_df, :L)
+    sort!(post_df, :L)
+    pre_gdf = groupby(pre_df, [:Drug, :L])
+    post_gdf = groupby(post_df, [:Drug, :L])
+    ratio = combine(pre_gdf, :Data => mean; renamecols = false)
+    stds = combine(pre_gdf, :Data => rsd; renamecols = false)
+    post_ratio = combine(post_gdf, :Data => mean; renamecols = false)
+    post_rsd = combine(post_gdf, :Data => rsd; renamecols = false)
+    ratio[:, :Data] = @. ratio_pct(ratio[!, :Data], post_ratio[!, :Data])
+    stds[:, :Data] = @. f_rsd_sum_std(stds[!, :Data], post_rsd[!, :Data], ratio[!, :Data])
+    insertcols!(ratio, :Stats => "Ratio")
+    insertcols!(stds, :Stats => "Standard Deviation")
+    result = vcat(ratio, stds)
+    select!(result, [:Drug, :L, :Stats, :Data])
+    sort!(result, [:Drug, :L])
 end
 
 """
-    StabilityData(tbl::Table; d0 = r"S.*_(.*)_.*", days = r"S.*_(.*)_(.*)_(.*)_.*", order = "TDL", type = "Accuracy")
+    stability_report(df::DataFrame; i0 = r"S.*_(.*)_.*", id = r"S.*_(.*)_(.*)_(.*)_.*", order = "TDL", type = "Accuracy")
 
-Create `StabilityData` from a table.
+Compute stability.
 
 # Arguments
-* `tbl`: a `Table`.
-* `d0`: `Regex` identifier for day0 samples. The concentration level is captured in the identifier.
-* `days`: `Regex` identifier for the stability samples. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by `order`.
-* `order`: a string for setting the order of captured values from `days`; T is temperature (storage condition); D is storage days; L is concentration level
+* `df`: a `DataFrame`.
+* `i0`: `Regex` identifier for day0 samples. The concentration level is captured in the identifier.
+* `id`: `Regex` identifier for the stability samples. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by `order`.
+* `order`: a string for setting the order of captured values from `id`; T is temperature (storage condition); D is storage days; L is concentration level
 * `type`: quantification value type.
 """
-function StabilityData(tbl::Table; d0 = r"S.*_(.*)_.*", days = r"S.*_(.*)_(.*)_(.*)_.*", order = "TDL", type = "Accuracy")
-    cols = propertynames(tbl)
-    df = @p tbl filter(==(type, getproperty(_, cols[2])))
-    d0_tbl = @p df filter(occursin(d0, getproperty(_, cols[1]))) Table
+function stability_report(df::DataFrame; i0 = r"S.*_(.*)_.*", id = r"S.*_(.*)_(.*)_(.*)_.*", order = "TDL", type = "Accuracy")
+    cols = propertynames(df)
+    datatype = cols[2]
     level = cols[1]
-    getproperty(d0_tbl, level) .= getindex.(match.(d0, getproperty(d0_tbl, level)), 1)
-    stability_tbl = @p df filter(occursin(days, getproperty(_, cols[1]))) Table
-    stability_tbl = Table(stability_tbl; (Symbol.(split(order, "")) .=> map(1:length(order)) do i 
-        getindex.(match.(days, getproperty(stability_tbl, level)), i)
+    drugs = cols[3:end]
+    df = filter(datatype => ==(type), df)
+    stability_df = filter(level => Base.Fix1(occursin, i0), df)
+    i0_data = Dict(:T => "", :D => 0, :L => getindex.(match.(i0, getproperty(stability_df, level)), 1))
+    insertcols!(stability_df, 1, map(Symbol.(split(order, ""))) do p
+        p => i0_data[p]
+    end...)
+    select!(stability_df, Not([datatype, level]))
+    ulevel = unique(stability_df.L)
+    stability_df2 = filter(level => Base.Fix1(occursin, id), df)
+    insertcols!(stability_df2, 1, (Symbol.(split(order, "")) .=> map(1:length(order)) do i 
+        getindex.(match.(id, stability_df2[!, level]), i)
     end
     )...)
-    stability_tbl = Table(stability_tbl; D = (@p stability_tbl.D map(parse(Int, replace(_, "D" => "")))))
-    stability_tbl = sort(stability_tbl, :D)
-    ls = @p stability_tbl.L unique
-    ndays = @p stability_tbl.D unique
-    pushfirst!(ndays, 0)
-    d0_gtbl = @p d0_tbl filter(in(getproperty(_, level), ls)) group(getproperty(level)) map((columns ∘ getproperties)(_, cols[3:end]))
-    gtbl = @p stability_tbl group(getproperty(:T)) map(group(getproperty(:L), _)) map(map(x -> group(getproperty(:D), x), _)) map((fmap ∘ fmap)(getproperties(propertynames(stability_tbl)[3:end - 3])))
-    d0_accuracy = @p d0_gtbl map(fmap(mean))
-    d0_std = @p d0_gtbl map(fmap(std))
-    accuracy = @p gtbl map(fmap((x -> Table((Days = ndays, ), x)) ∘ vcat_fmap2_table_skip1(mean))(d0_accuracy , _))
-    stds = @p gtbl map(fmap((x -> Table((Days = ndays, ), x)) ∘ vcat_fmap2_table_skip1(std))(d0_std , _))
-    StabilityData(accuracy, stds)
+    select!(stability_df2, Not([datatype, level]))
+    stability_df2[!, :D] .= @p stability_df2.D map(parse(Int, _))
+    intersect!(ulevel, unique(stability_df2.L))
+    append!(stability_df, stability_df2)
+    filter!(:L => in(ulevel), stability_df)
+    sort!(stability_df, :D)
+    stability_df = stack(stability_df, drugs, [:T, :D, :L]; variable_name = :Drug, value_name = :Data)
+    gdf = groupby(stability_df, [:Drug, :T, :D, :L])
+    accuracy = combine(gdf, :Data => mean, renamecols = false)
+    stds = combine(gdf, :Data => std, renamecols = false)
+    insertcols!(accuracy, :Stats => "Accuracy")
+    insertcols!(stds, :Stats => "Standard Deviation")
+    result = vcat(accuracy, stds)
+    select!(result, [:Drug, :T, :D, :L, :Stats, :Data])
+    sort!(result, [:Drug, :T, :D, :L])
+    day0 = filter(:D => ==(0), result)
+    filter!(:D => >(0), result)
+    (; day0, result)
 end
-
-"""
-    Report(::Data)
-
-Create `Report` from `Data`
-"""
-function Report(data::StabilityData)
-    nt = map((accuracy = data.accuracy, std = data.std)) do dt
-        mapreduce(vcat, pairs(dt)) do (temp, tbl)
-            levels = @p tbl keys collect
-            new = Pair{Symbol, Any}[:Days => getindex(tbl, levels[1]).Days]
-            drugs = @p getindex(tbl, levels[1]) propertynames collect
-            popfirst!(drugs)
-            for drug in drugs
-                for level in levels
-                    push!(new, Symbol(string(drug) * "_" * level) => getproperty(getindex(tbl, level), drug))
-                end
-            end
-            Table((Temp = repeat([temp], length(new[1][2])), ); new...)
-        end
-    end
-    cols = @p nt.accuracy propertynames collect
-    new = Pair{Symbol, Any}[:Temp => nt.accuracy.Temp, :Days => nt.accuracy.Days]
-    cols = cols[3:end]
-    for col in cols
-        push!(new, Symbol(string(col) * "_" * "acc") => getproperty(nt.accuracy, col))
-        push!(new, Symbol(string(col) * "_" * "std") => getproperty(nt.std, col))
-    end
-    Report(data, Table(; new...))
-end
-
-function Report(data::APData)
-    levels = @p data.summary keys collect
-    ndays = size(getindex(data.daily.accuracy, levels[1]), 1)
-    stats = vcat([["Accuracy($i)", "standard deviation($i)", "RSD($i)"] for i in 1:ndays]..., getindex(data.summary, levels[1]).Stats)
-    new = Pair{Symbol, Any}[:Stats => stats]
-    drugs = @p getindex(data.summary, levels[1]) propertynames collect
-    popfirst!(drugs)
-    for drug in drugs
-        for level in levels
-            daily_acc = getproperty(data.daily.accuracy[level], drug)
-            daily_std = getproperty(data.daily.std[level], drug)
-            daily_rsd = getproperty(data.daily.rsd[level], drug)
-            stat = vcat([[daily_acc[i], daily_std[i], daily_rsd[i]] for i in 1:ndays]..., getproperty(getindex(data.summary, level), drug))
-            push!(new, Symbol(string(drug) * "_" * level) => stat)
-        end
-    end
-    Report(data, Table(; new...))
-end
-
-Report(data::RecoveryData) = Report(data, ratio_report(data.data))
-Report(data::MEData) = Report(data, ratio_report(data.data))
-
-function ratio_report(data::TypedTables.Dictionary)
-    levels = @p data keys collect
-    new = Pair{Symbol, Any}[:Stats => getindex(data, levels[1]).Stats]
-    drugs = @p getindex(data, levels[1]) propertynames collect
-    popfirst!(drugs)
-    for drug in drugs
-        for level in levels
-            push!(new, Symbol(string(drug) * "_" * level) => getproperty(getindex(data, level), drug))
-        end
-    end
-    Table(; new...)
-end
-
