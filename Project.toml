@@ -5,6 +5,7 @@ version = "0.3.0"
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+Chain = "8be319e6-bccf-4806-a6f7-6fae938471bc"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DataPipes = "02685ad9-2d12-40c3-9f73-c6aeda6a7ff5"
 SplitApplyCombine = "03a91e81-4c3e-53e1-a0a4-9c0c8f19dd66"
@@ -13,11 +14,12 @@ TypedTables = "9d95f2ec-7b3d-5a63-8d20-e2491e220bb9"
 
 [compat]
 CSV = "0.10"
+Chain = "0.5"
+DataFrames = "1.5.0"
 DataPipes = "0.3"
 SplitApplyCombine = "1"
 TypedTables = "1"
 julia = "1"
-DataFrames = "1.5.0"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

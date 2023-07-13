@@ -1,34 +1,24 @@
 rsd(v) = std(v) / mean(v) * 100
 
 apply(fs, x...) = [f(x...) for f in fs]
-vcat_fmap2_table_skip1(f) = (x, y) -> vcat([x], (collect ∘ fmap(fmap(f) ∘ columns))(y))
-
-reducer(f) = (x...) -> reduce(f, x)
-applyer(f) = (x...) -> f(x)
-fmap(f) = (x...) -> map(f, x...)
 
 f_var_inter(var_bet, var_intra, inv_n) = max(var_bet - var_intra * inv_n, 0)
 f_var_sum_pct(var1, var2, means) = sqrt(var1 + var2) / means * 100
 ratio_pct(x, y) = x / y * 100
 f_rsd_sum_std(x, y, m) = sqrt(x ^ 2 + y ^ 2) * m
 
-f_std(vars) = sqrt(vars)
-f_rsd(vars, means) = sqrt(vars) / means * 100
-f_rsd(var1, var2, means) = sqrt(var1 + var2) / means * 100
-std_sum(x, y) = sqrt(x^2 + y^2)
-
 """
-    flat(df::DataFrame, col)
-    flat(df::DataFrame, cols::AbstractVector) 
+    flattable(df::DataFrame, col)
+    flattable(df::DataFrame, cols::AbstractVector) 
 
-Turn `DataFrame` into flat form.
+Turn `DataFrame` into wide format.
 
 # Arguments
 * `df`: target `DataFrame`.
 * `col`: the column (Symbol or string) holding the column names in wide format.
 * `cols`: a vecctor of columns (Symbol or string) holding the column names in wide format.
 """
-function flat(df::DataFrame, col)
+function flattable(df::DataFrame, col)
     cols = names(df)
     value_id = findall(x -> occursin("Data", x), cols)
     row_id = setdiff(eachindex(cols), value_id)
@@ -38,7 +28,7 @@ function flat(df::DataFrame, col)
     length(dfs) == 1 ? dfs[1] : outerjoin(dfs...; on = cols[row_id])
 end
 
-function flat(df::DataFrame, cols::AbstractVector) 
+function flattable(df::DataFrame, cols::AbstractVector) 
     for col in cols
         df = flat(df, col)
     end
@@ -91,7 +81,7 @@ Normalize `DataFrame` by the given normalizer.
 * `normalizer`: the `DataFrame` to normalize `df`.
 * `df`: the `DataFrame` to be normalized.
 * `id`: the column(s) (Symbol, string or integer) with a unique key for each row.
-* `stats`: a `Tuple` represented as statistics involved in normalization. The first argument applies to `normalizer`, and the second applies to `df`.
+* `stats`: a `Tuple` represented as statistics involved in normalization. The first argument applies to `normalizer`, and the second applies to `df`. `All()` indicates including all statistics.
 """
 function normalize(normalizer::DataFrame, df::DataFrame; id = [:Drug, :L], stats = ("Accuracy", All()))
     normalizer = filter(:Stats => ==(stats[1]), normalizer)
