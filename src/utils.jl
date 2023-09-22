@@ -20,7 +20,7 @@ Turn `DataFrame` into wide format.
 """
 function flattable(df::DataFrame, col)
     cols = names(df)
-    value_id = findall(x -> occursin("Data", x), cols)
+    value_id = findall(x -> ==("Data", x), cols)
     row_id = setdiff(eachindex(cols), value_id)
     col_id = findfirst(==(String(col)), cols)
     setdiff!(row_id, col_id)

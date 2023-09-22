@@ -25,7 +25,7 @@ function read_data(file)
     tbl_id = CSV.read(file, DataFrame; select = [datafile], skipto = 3)
     mapreduce(vcat, 0:n_datatype) do i
         tbl = CSV.read(file, DataFrame; select = ic .+ i, skipto = 3)
-        DataFrame(t[2][datafile] => getproperty(tbl_id, propertynames(tbl_id)[1]), "Data Type" => repeat([dname[i + 1]], size(tbl_id, 1)), (cname .=> eachcol(tbl))...)
+        DataFrame("File" => getproperty(tbl_id, propertynames(tbl_id)[1]), "Data Type" => repeat([dname[i + 1]], size(tbl_id, 1)), (cname .=> eachcol(tbl))...)
     end
 end
 
