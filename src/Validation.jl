@@ -7,7 +7,7 @@ include("utils.jl")
 """
     read_data(file)
 
-Read csv data from Agilent MassHunter Quantitative analysis. The table needs to be flat.
+Read csv data from Agilent MassHunter Quantitative analysis. The table needs to be flat. There must be a column whose name contains \"Data File\" as id for each file.
 """
 function read_data(file)
     t = Vector{Vector{String}}(undef, 2)
@@ -21,10 +21,11 @@ function read_data(file)
     cname = @p ic map(replace(t[1][_], " Results" => ""))
     n_datatype = round(Int, (length(t[1]) - ic[1] + 1) / length(ic)) - 1
     dname = t[2][ic[1]:ic[1] + n_datatype]
-    tbl_id = CSV.read(file, DataFrame; select = [2], skipto = 3)
+    datafile = findfirst(x -> occursin("Data File", string(x)), t[2])
+    tbl_id = CSV.read(file, DataFrame; select = [datafile], skipto = 3)
     mapreduce(vcat, 0:n_datatype) do i
         tbl = CSV.read(file, DataFrame; select = ic .+ i, skipto = 3)
-        DataFrame(t[2][2] => tbl_id.Column2, "Data Type" => repeat([dname[i + 1]], size(tbl_id, 1)), (cname .=> eachcol(tbl))...)
+        DataFrame(t[2][datafile] => getproperty(tbl_id, propertynames(tbl_id)[1]), "Data Type" => repeat([dname[i + 1]], size(tbl_id, 1)), (cname .=> eachcol(tbl))...)
     end
 end
 
