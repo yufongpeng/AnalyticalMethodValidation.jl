@@ -1,6 +1,6 @@
 module Validation
 using DataPipes, Statistics, CSV, DataFrames, Chain
-export read_data, qc_report, sample_report, ap_report, me_report, recovery_report, stability_report, flattable, mean_plus_minus_std, merge_stats, normalize
+export read_data, qc_report, sample_report, ap_report, me_report, recovery_report, stability_report, flattable, mean_plus_minus_std, add_percentage, merge_stats, normalize
 
 include("utils.jl")
 

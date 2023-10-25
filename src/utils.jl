@@ -48,6 +48,17 @@ Round and merge mean values and standard deviations with "±".
 mean_plus_minus_std(m, s; digits = 2) = string.(round.(m; digits), "±", round.(s; digits))
 
 """
+    add_percentage(s; digits = 2)
+
+Add "%" to `s`.
+
+# Arguments
+* `s`: numbers.
+* `digits`: rounds to the specified number of digits after the decimal place.
+"""
+add_percentage(s; digits = 2) = string.(round.(s; digits), Ref("%"))
+
+"""
     merge_stats(df::DataFrame, col_pairs...; kwargs...)
 
 Merge spcific statistics.
