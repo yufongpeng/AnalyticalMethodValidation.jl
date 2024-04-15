@@ -1,192 +1,405 @@
 """
-    APData(tbls::Table...; id = r"Pre.*_(.*)_.*", type = "Accuracy")
+    qc_report(at::AnalysisTable;
+                id = r"PooledQC", 
+                type = :estimated_concentration, 
+                pct = true,
+                stats = [mean, std, pct ? rsd_pct : rsd], 
+                names = ["Mean", "Standard Deviation", "Relative Standard Deviation" * (pct ? "(%)" : "")], 
+                colanalyte = :Analyte,
+                colstats = :Stats
+            )
 
-Create `APData` from multiple tables.
+Compute statistics of QC data.
 
 # Arguments
-* `tbls`: each table should contain data of one day.
-* `id`: `Regex` identifier for the AP experiment samples. The concentration level is captured in the identifier.
-* `type`: quantification value type.
+* `at`: `AnalysisTable`.
+* `id`: `Regex` identifier for the QC samples.
+* `pct`: whether converting ratio data into percentage (*100).
+* `type`: data type for calculation.
+* `stats`: statistics functions.
+* `names`: names of statistics. When `nothing` is given, `stats` is served as `names`.
+* `colanalyte`: column name of analytes.
+* `colstats`: column name of statistics.
 """
-function APData(tbls::Table...; id = r"Pre.*_(.*)_.*", type = "Accuracy")
-    gtbls = map(tbls) do tbl
-        cols = propertynames(tbl)
-        ap = @p tbl filter(occursin(id, getproperty(_, cols[1]))) filter(==(type, getproperty(_, cols[2]))) Table
-        level = cols[1]
-        getproperty(ap, level) .= getindex.(match.(id, getproperty(ap, level)), 1)
-        ap = @p ap group(getproperty(level)) map(getproperties(_, propertynames(ap)[3:end])) map(columns)
+function qc_report(at::AnalysisTable; 
+                    id = r"PooledQC", 
+                    type = :estimated_concentration, 
+                    pct = true,
+                    stats = [mean, std, pct ? rsd_pct : rsd], 
+                    names = ["Mean", "Standard Deviation", "Relative Standard Deviation" * (pct ? "(%)" : "")], 
+                    colanalyte = :Analyte,
+                    colstats = :Stats
+                )
+    colanalyte = Symbol(colanalyte)
+    colstats = Symbol(colstats)
+    dt = getproperty(at, Symbol(type))
+    df = CQA.table(dt)
+    if !isa(df, DataFrame)
+        df = DataFrame(df)
     end
-    ns = @p gtbls mapreduce(map(x -> map(y -> 1 / length(y), x), _), fmap(vcat)) map(Table) map(map(mean, columns(_)))
-    accuracies = @p gtbls mapreduce(map(x -> map(mean, x), _), fmap(vcat)) map(Table)
-    vars = @p gtbls mapreduce(map(x -> map(var, x), _), fmap(vcat)) map(Table)
-    accuracy = @p accuracies map(map(mean, columns(_)))
-    var_intra = @p vars map(map(mean, columns(_)))
-    std_intra = @p var_intra map(map(sqrt, _))
-    rsds = fmap(Table ∘ (fmap ∘ fmap)(f_rsd))(vars, accuracies)
-    stds = fmap(Table ∘ (fmap ∘ fmap)(f_std))(vars)
-    var_bet = @p accuracies map(map(var, columns(_)))
-    std_bet = @p var_bet map(map(sqrt, _))
-    var_inter = (fmap ∘ fmap)(f_var_inter)(var_bet, var_intra, ns)
-    std_inter = @p var_inter map(map(sqrt, _))
-    repeatability = (fmap ∘ fmap)(f_rsd)(var_intra, accuracy)
-    reproducibility = (fmap ∘ fmap)(f_rsd)(var_inter, var_intra, accuracy)
-    stats = ["Accuracy", "Intraday standard deviation", "Intraday variance", "\"Betweenday\" standard deviation", "\"Betweenday\" variance", "Interday standard deviation", "Interday variance", "Repeatability", "Reproducibility"]
-    APData(
-        (accuracy = accuracies, std = stds, rsd = rsds, var = vars), 
-        fmap((x -> Table((Stats = stats, ), x)) ∘ fmap(vcat))(accuracy, std_intra, var_intra, std_bet, var_bet, std_inter, var_inter, repeatability, reproducibility)
-    )
+    analytes = analytename(at)
+    scol = samplecol(dt)
+    names = isnothing(names) ? stats : names
+    @chain df begin
+        filter(scol => Base.Fix1(occursin, id), _) 
+        stack(analytes, scol; variable_name = colanalyte, value_name = :Data)
+        select!([colanalyte, :Data])
+        groupby(colanalyte)
+        combine(:Data => x -> vcat(apply(stats, x)...); renamecols = false)
+        insertcols!(_, 2, colstats => repeat(string.(names); outer = size(_, 1) ÷ length(stats)))
+        sort!(colanalyte)
+    end
 end
 
 """
-    MEData(tbl::Table; matrix = r"Post.*_(.*)_.*", stds = r"STD.*_(.*)_.*", type = "Area")
+    sample_report(at::AnalysisTable; id = r"Sample_(\\d*).*", type = :estimated_concentration, colanalyte = :Analyte)
 
-Create `MEData` from a table.
+Compute mean of sample data.
 
 # Arguments
-* `tbl`: a `Table`.
+* `at`: `AnalysisTable`.
+* `id`: `Regex` identifier for the QC samples.
+* `type`: data type for calculation.
+* `colanalyte`: column name of analytes.
+"""
+function sample_report(at::AnalysisTable; id = r"Sample_(\d*).*", type = :estimated_concentration, colanalyte = :Analyte)
+    colanalyte = Symbol(colanalyte)
+    dt = getproperty(at, Symbol(type))
+    df = CQA.table(dt)
+    if !isa(df, DataFrame)
+        df = DataFrame(df)
+    end
+    analytes = analytename(at)
+    scol = samplecol(dt)
+    sample = @p df filter(scol => Base.Fix1(occursin, id))
+    sample[:, scol] = map(x -> match(id, x)[1], sample[!, scol])
+    @chain sample begin
+        stack(analytes, scol; variable_name = colanalyte, value_name = :Data)
+        select!([scol, colanalyte, :Data])
+        groupby([scol, colanalyte])
+        combine(:Data => mean; renamecols = false)
+    end
+end
+
+"""
+    ap_report(at::AnalysisTable; 
+                id = r"Pre.*_(.*)_.*", 
+                type = :accuracy, 
+                pct = true, 
+                colanalyte = :Analyte,
+                colstats = :Stats,
+                colday = :Day,
+                collevel = :Level
+            )
+
+Compute accuracy and precision. A `NamedTuple` is returned with two elements: `daily` is a `DataFrame` containing accuracy and standard deviation for each day, and `summary` is a `DataFrame` containing overall accuracy, repeatability and reproducibility. 
+
+# Arguments
+* `at`: `AnalysisTable`.
+* `id`: `Regex` identifier for the AP experiment samples. The day and concentration level is captured in the identifier; the order can be set by `order`.
+* `order`: a string for setting the order of captured values from `id`; D is day; L is concentration level.
+* `type`: data type for calculation.
+* `pct`: whether converting ratio data into percentage (*100).
+* `colanalyte`: column name of analytes.
+* `colstats`: column name of statistics.
+* `colday`: column name of validation day.
+* `collevel`: column name of level.
+"""
+function ap_report(at::AnalysisTable; 
+                    id = r"Pre(.*)_(.*)_.*", 
+                    order = "DL", 
+                    type = :accuracy, 
+                    pct = true, 
+                    colanalyte = :Analyte,
+                    colstats = :Stats,
+                    colday = :Day,
+                    collevel = :Level
+                )
+    colanalyte = Symbol(colanalyte)
+    colstats = Symbol(colstats)
+    colday = Symbol(colday)
+    collevel = Symbol(collevel)
+    col = ["Accuracy", "Standard Deviation", "Accuracy", "Intraday Standard Deviation", "Betweenday Standard Deviation", "Interday Standard Deviation", "Repeatability", "Reproducibility"]
+    if pct
+        f_var_sum_rsd_ = f_var_sum_rsd_pct
+        ratio_ = ratio_pct
+        col .*= "(%)"
+    else
+        f_var_sum_rsd_ = f_var_sum_rsd
+        ratio_ = /
+    end
+    dt = getproperty(at, Symbol(type))
+    df = CQA.table(dt)
+    if !isa(df, DataFrame)
+        df = DataFrame(df)
+    end
+    analytes = analytename(at)
+    level = samplecol(dt)
+    ap_df = @chain df begin 
+        filter(level => Base.Fix1(occursin, id), _)
+        insertcols!(_, 1, (Symbol.("__", split(order, "")) .=> map(1:length(order)) do i 
+            getindex.(match.(id, _[!, level]), i)
+        end
+        )...)
+        select!(Not([level]))
+    end
+    rename!(ap_df, :__D => colday, :__L => collevel)
+    ap_df[!, colday] .= @p getproperty(ap_df, colday) map(parse(Int, _))
+    ap_df = stack(ap_df, analytes, [collevel, colday]; variable_name = colanalyte, value_name = :Data)
+    pct && (ap_df[!, colday] .*= 100)
+    gdf = groupby(ap_df, [colanalyte, collevel, colday])
+    ns = @chain gdf begin
+        combine(:Data .=> inv ∘ length; renamecols = false)
+        groupby([colanalyte, collevel])
+        combine(:Data => mean; renamecols = false)
+    end 
+    accuracies = combine(gdf, :Data => mean; renamecols = false)
+    stds = combine(gdf, :Data => std; renamecols = false)
+    vars = combine(gdf, :Data => var; renamecols = false)
+    accuracy, var_bet = @chain accuracies begin
+        groupby([colanalyte, collevel])
+        (combine(_, :Data => mean; renamecols = false), combine(_, :Data => var; renamecols = false))
+    end
+    var_intra = combine(groupby(vars, [colanalyte, collevel]), :Data => mean; renamecols = false)
+    var_inter = deepcopy(accuracy)
+    var_inter[:, :Data] = @. f_var_inter(getproperty([var_bet, var_intra, ns], :Data)...)
+    reproducibility = deepcopy(accuracy)
+    reproducibility[:, :Data] = @. f_var_sum_rsd_(getproperty([var_intra, var_inter, reproducibility], :Data)...)
+    std_intra = transform!(var_intra, :Data => ByRow(sqrt); renamecols = false)
+    std_bet = transform!(var_bet, :Data => ByRow(sqrt); renamecols = false)
+    std_inter = transform!(var_inter, :Data => ByRow(sqrt); renamecols = false)
+    repeatability = deepcopy(accuracy)
+    repeatability[:, :Data] = @. ratio_(getproperty([std_intra, repeatability], :Data)...)
+    for (st, nm) in zip([accuracies, stds, accuracy, std_intra, std_bet, std_inter, repeatability, reproducibility], col)
+        insertcols!(st, colstats => nm)
+    end
+    daily = @chain vcat(accuracies, stds) begin
+        select!([colanalyte, collevel, colday, colstats, :Data])
+        sort!([colanalyte, collevel, colday])
+    end
+    summary = @chain vcat(std_intra, accuracy, std_bet, std_inter, repeatability, reproducibility) begin
+        select!([colanalyte, collevel, colstats, :Data])
+        sort!([colanalyte, collevel])
+    end
+    (; daily, summary)
+end
+
+"""
+    me_report(at::AnalysisTable; 
+                matrix = r"Post.*_(.*)_.*", 
+                stds = r"STD.*_(.*)_.*", 
+                type = :area, 
+                pct = true, 
+                colanalyte = :Analyte,
+                colstats = :Stats,
+                collevel = :Level
+            )
+
+Compute matrix effects.
+
+# Arguments
+* `at`: `AnalysisTable`.
 * `matrix`: `Regex` identifier for samples with matrix. The concentration level is captured in the identifier.
 * `stds`: `Regex` identifier for standard solution. The concentration level is captured in the identifier.
-* `type`: quantification value type.
+* `type`: data type for calculation.
+* `pct`: whether converting ratio data into percentage (*100).
+* `colanalyte`: column name of analytes.
+* `colstats`: column name of statistics.
+* `collevel`: column name of level.
 """
-MEData(tbl::Table; matrix = r"Post.*_(.*)_.*", stds = r"STD.*_(.*)_.*", type = "Area") = ratio_data(tbl; type, pre = matrix, post = stds) |> MEData
+function me_report(at::AnalysisTable; 
+                    matrix = r"Post.*_(.*)_.*", 
+                    stds = r"STD.*_(.*)_.*", 
+                    type = :area, 
+                    pct = true, 
+                    colanalyte = :Analyte,
+                    colstats = :Stats,
+                    collevel = :Level
+                )
+    df = ratio_data(at; type, pre = matrix, post = stds, pct, colanalyte, colstats, collevel)
+    replace!(getproperty(df, colstats), pct ? "Ratio(%)" => "Matrix Effect(%)" : "Ratio" => "Matrix Effect")
+    df
+end
 
 """
-    RecoveryData(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.")
+    recovery_report(at::AnalysisTable; 
+                    pre = r"Pre.*_(.*)_.*", 
+                    post = r"Post.*_(.*)_.*", 
+                    type = :area, 
+                    pct = true, 
+                    colanalyte = :Analyte,
+                    colstats = :Stats,
+                    collevel = :Level
+                )
 
-Create `RecoveryData` from a table.
+Compute recovery.
 
 # Arguments
-* `tbl`: a `Table`.
+* `at`: `AnalysisTable`.
 * `pre`: `Regex` identifier for prespiked samples. The concentration level is captured in the identifier.
 * `post`: `Regex` identifier for postspiked samples. The concentration level is captured in the identifier.
-* `type`: quantification value type.
+* `type`: data type for calculation.
+* `pct`: whether converting ratio data into percentage (*100).
+* `colanalyte`: column name of analytes.
+* `colstats`: column name of statistics.
+* `collevel`: column name of level.
 """
-RecoveryData(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.") = ratio_data(tbl; type, pre, post) |> RecoveryData
+function recovery_report(at::AnalysisTable; 
+                            pre = r"Pre.*_(.*)_.*", 
+                            post = r"Post.*_(.*)_.*", 
+                            type = :area, 
+                            pct = true, 
+                            colanalyte = :Analyte,
+                            colstats = :Stats,
+                            collevel = :Level
+                        )
+    df = ratio_data(at; type, pre, post, pct, colanalyte, colstats, collevel)
+    replace!(getproperty(df, colstats), pct ? "Ratio(%)" => "Recovery(%)" : "Ratio" => "Recovery")
+    df
+end
 
-function ratio_data(tbl::Table; pre = r"Pre.*_(.*)_.*", post = r"Post.*_(.*)_.*", type = "Final Conc.")
-    cols = propertynames(tbl)
-    df = @p tbl filter(==(type, getproperty(_, cols[2]))) 
-    pre_tbl = @p df filter(occursin(pre, getproperty(_, cols[1]))) Table
-    post_tbl = @p df filter(occursin(post, getproperty(_, cols[1]))) Table
-    level = cols[1]
-    getproperty(pre_tbl, level) .= getindex.(match.(pre, getproperty(pre_tbl, level)), 1)
-    getproperty(post_tbl, level) .= getindex.(match.(post, getproperty(post_tbl, level)), 1)
-    pre_tbls = @p pre_tbl group(getproperty(level)) map(getproperties(_, propertynames(pre_tbl)[3:end])) map(columns)
-    post_tbls = @p post_tbl group(getproperty(level)) map(getproperties(_, propertynames(post_tbl)[3:end])) map(columns)
-    pre_report = @p pre_tbls map(Table ∘ fmap(x -> apply([mean, rsd], x)))
-    post_report = @p post_tbls map(Table ∘ fmap(x -> apply([mean, rsd], x)))
-    report = map((x, y) -> Table((Stats = ["Recovery", "RSD"], ), Table(fmap(map)([pct_ratio, std_sum], x, y))), pre_report, post_report)
-    for level in report
-        drugs = @p level propertynames collect
-        insert!(getproperty(level, drugs[1]), 2, "standard deviation")
-        popfirst!(drugs)
-        for drug in drugs
-            dt = getproperty(level, drug)
-            insert!(dt, 2, dt[1] * dt[2])
-        end
+function ratio_data(at::AnalysisTable; 
+                    pre = r"Pre.*_(.*)_.*", 
+                    post = r"Post.*_(.*)_.*", 
+                    type = :estimated_concentration, 
+                    pct = true, 
+                    colanalyte = :Analyte,
+                    colstats = :Stats,
+                    collevel = :Level
+                )
+    colanalyte = Symbol(colanalyte)
+    colstats = Symbol(colstats)
+    collevel = Symbol(collevel)
+    col = ["Ratio", "Standard Deviation"]
+    if pct
+        ratio_ = ratio_pct
+        col .*= "(%)"
+    else
+        ratio_ = /
     end
-    report
+    dt = getproperty(at, Symbol(type))
+    df = CQA.table(dt)
+    if !isa(df, DataFrame)
+        df = DataFrame(df)
+    end
+    analytes = analytename(at)
+    level = samplecol(dt)
+    df = @chain df begin
+        stack(analytes, level; variable_name = colanalyte, value_name = :Data)
+        rename!(Dict(level => collevel))
+    end
+    pre_df = filter(collevel => Base.Fix1(occursin, pre), df)
+    post_df = filter(collevel => Base.Fix1(occursin, post), df)
+    pre_df[:, collevel] = getindex.(match.(pre, pre_df[!, collevel]), 1)
+    post_df[:, collevel] = getindex.(match.(post, post_df[!, collevel]), 1)
+    sort!(pre_df, collevel)
+    sort!(post_df, collevel)
+    pre_gdf = groupby(pre_df, [colanalyte, collevel])
+    post_gdf = groupby(post_df, [colanalyte, collevel])
+    ratio = combine(pre_gdf, :Data => mean; renamecols = false)
+    stds = combine(pre_gdf, :Data => rsd; renamecols = false)
+    post_ratio = combine(post_gdf, :Data => mean; renamecols = false)
+    post_rsd = combine(post_gdf, :Data => rsd; renamecols = false)
+    ratio[:, :Data] = @. ratio_(ratio[!, :Data], post_ratio[!, :Data])
+    stds[:, :Data] = @. f_rsd_sum_std(stds[!, :Data], post_rsd[!, :Data], ratio[!, :Data])
+    insertcols!(ratio, colstats => col[1])
+    insertcols!(stds, colstats => col[2])
+    @chain vcat(ratio, stds) begin
+        select!([colanalyte, collevel, colstats, :Data])
+        sort!([colanalyte, collevel])
+    end
 end
 
 """
-    StabilityData(tbl::Table; d0 = r"S.*_(.*)_.*", days = r"S.*_(.*)_(.*)_(.*)_.*", order = "TDL", type = "Accuracy")
-
-Create `StabilityData` from a table.
+    stability_report(at::AnalysisTable; 
+                        d0 = r"S.*_(.*)_.*", 
+                        id = r"S.*_(.*)_(.*)_(.*)_.*", 
+                        order = "CDL", 
+                        type = :accuracy, 
+                        pct = true,                             
+                        colanalyte = :Analyte,
+                        colstats = :Stats,
+                        colcondition = :Condition,
+                        colday = :Day,
+                        collevel = :Level
+                    )
+Compute stability. A `NamedTuple` is returned with two elements: `day0` is a `DataFrame` conataing day0 data, and `result` is a `DataFrame` conataing data of other days. 
 
 # Arguments
-* `tbl`: a `Table`.
+* `at`: `AnalysisTable`.
 * `d0`: `Regex` identifier for day0 samples. The concentration level is captured in the identifier.
-* `days`: `Regex` identifier for the stability samples. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by `order`.
-* `order`: a string for setting the order of captured values from `days`; T is temperature (storage condition); D is storage days; L is concentration level
-* `type`: quantification value type.
+* `id`: `Regex` identifier for the stability samples. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by `order`.
+* `order`: a string for setting the order of captured values from `id`; C is storage condition; D is storage days; L is concentration level
+* `type`: data type for calculation.
+* `pct`: whether converting ratio data into percentage (*100).
+* `colanalyte`: column name of analytes.
+* `colstats`: column name of statistics.
+* `colcondition`: column name of storage condition.
+* `colday`: column name of validation day.
+* `collevel`: column name of level.
 """
-function StabilityData(tbl::Table; d0 = r"S.*_(.*)_.*", days = r"S.*_(.*)_(.*)_(.*)_.*", order = "TDL", type = "Accuracy")
-    cols = propertynames(tbl)
-    df = @p tbl filter(==(type, getproperty(_, cols[2])))
-    d0_tbl = @p df filter(occursin(d0, getproperty(_, cols[1]))) Table
-    level = cols[1]
-    getproperty(d0_tbl, level) .= getindex.(match.(d0, getproperty(d0_tbl, level)), 1)
-    stability_tbl = @p df filter(occursin(days, getproperty(_, cols[1]))) Table
-    stability_tbl = Table(stability_tbl; (Symbol.(split(order, "")) .=> map(1:length(order)) do i 
-        getindex.(match.(days, getproperty(stability_tbl, level)), i)
+function stability_report(at::AnalysisTable; 
+                            d0 = r"S.*_(.*)_.*", 
+                            id = r"S.*_(.*)_(.*)_(.*)_.*", 
+                            order = "CDL", 
+                            type = :accuracy, 
+                            pct = true,                             
+                            colanalyte = :Analyte,
+                            colstats = :Stats,
+                            colcondition = :Condition,
+                            colday = :Day,
+                            collevel = :Level
+                        )
+    colanalyte = Symbol(colanalyte)
+    colstats = Symbol(colstats)
+    colcondition = Symbol(colcondition)
+    colday = Symbol(colday)
+    collevel = Symbol(collevel)
+    col = ["Accuracy", "Standard Deviation"]
+    if pct
+        col .*= "(%)"
+    end
+    dt = getproperty(at, Symbol(type))
+    df = CQA.table(dt)
+    if !isa(df, DataFrame)
+        df = DataFrame(df)
+    end
+    analytes = analytename(at)
+    level = samplecol(dt)
+    stability_df = filter(level => Base.Fix1(occursin, d0), df)
+    d0_data = Dict(:__C => "", :__D => 0, :__L => getindex.(match.(d0, getproperty(stability_df, level)), 1))
+    insertcols!(stability_df, 1, map(Symbol.("__", split(order, ""))) do p
+        p => d0_data[p]
+    end...)
+    rename!(stability_df, :__C => colcondition, :__D => colday, :__L => collevel)
+    select!(stability_df, Not([level]))
+    ulevel = unique(getproperty(stability_df, collevel))
+    stability_df2 = filter(level => Base.Fix1(occursin, id), df)
+    insertcols!(stability_df2, 1, (Symbol.("__", split(order, "")) .=> map(1:length(order)) do i 
+        getindex.(match.(id, stability_df2[!, level]), i)
     end
     )...)
-    stability_tbl = Table(stability_tbl; D = (@p stability_tbl.D map(parse(Int, replace(_, "D" => "")))))
-    stability_tbl = sort(stability_tbl, :D)
-    ls = @p stability_tbl.L unique
-    ndays = @p stability_tbl.D unique
-    pushfirst!(ndays, 0)
-    d0_gtbl = @p d0_tbl filter(in(getproperty(_, level), ls)) group(getproperty(level)) map((columns ∘ getproperties)(_, cols[3:end]))
-    gtbl = @p stability_tbl group(getproperty(:T)) map(group(getproperty(:L), _)) map(map(x -> group(getproperty(:D), x), _)) map((fmap ∘ fmap)(getproperties(propertynames(stability_tbl)[3:end - 3])))
-    d0_accuracy = @p d0_gtbl map(fmap(mean))
-    d0_std = @p d0_gtbl map(fmap(std))
-    accuracy = @p gtbl map(fmap((x -> Table((Days = ndays, ), x)) ∘ vcat_fmap2_table_skip1(mean))(d0_accuracy , _))
-    stds = @p gtbl map(fmap((x -> Table((Days = ndays, ), x)) ∘ vcat_fmap2_table_skip1(std))(d0_std , _))
-    StabilityData(accuracy, stds)
-end
-
-"""
-    Report(::Data)
-
-Create `Report` from `Data`
-"""
-function Report(data::StabilityData)
-    nt = map((accuracy = data.accuracy, std = data.std)) do dt
-        mapreduce(vcat, pairs(dt)) do (temp, tbl)
-            levels = @p tbl keys collect
-            new = Pair{Symbol, Any}[:Days => getindex(tbl, levels[1]).Days]
-            drugs = @p getindex(tbl, levels[1]) propertynames collect
-            popfirst!(drugs)
-            for drug in drugs
-                for level in levels
-                    push!(new, Symbol(string(drug) * "_" * level) => getproperty(getindex(tbl, level), drug))
-                end
-            end
-            Table((Temp = repeat([temp], length(new[1][2])), ); new...)
-        end
+    rename!(stability_df2, :__C => colcondition, :__D => colday, :__L => collevel)
+    select!(stability_df2, Not([level]))
+    stability_df2[!, colday] .= @p getproperty(stability_df2, colday) map(parse(Int, _))
+    intersect!(ulevel, unique(getproperty(stability_df2, collevel)))
+    stability_df = @chain stability_df begin
+        append!(stability_df2)
+        filter!(collevel => in(ulevel), _)
+        sort!(colday)
+        stack(analytes, [colcondition, colday, collevel]; variable_name = colanalyte, value_name = :Data) 
     end
-    cols = @p nt.accuracy propertynames collect
-    new = Pair{Symbol, Any}[:Temp => nt.accuracy.Temp, :Days => nt.accuracy.Days]
-    cols = cols[3:end]
-    for col in cols
-        push!(new, Symbol(string(col) * "_" * "acc") => getproperty(nt.accuracy, col))
-        push!(new, Symbol(string(col) * "_" * "std") => getproperty(nt.std, col))
+    pct && (stability_df.Data .*= 100)
+    gdf = groupby(stability_df, [colanalyte, colcondition, colday, collevel])
+    accuracy = combine(gdf, :Data => mean, renamecols = false)
+    stds = combine(gdf, :Data => std, renamecols = false)
+    insertcols!(accuracy, colstats => col[1])
+    insertcols!(stds, colstats => col[2])
+    result = @chain vcat(accuracy, stds) begin
+        select!([colanalyte, colcondition, colday, collevel, colstats, :Data])
+        sort!([colanalyte, colcondition, colday, collevel])
     end
-    Report(data, Table(; new...))
+    day0 = filter(colday => ==(0), result)
+    filter!(colday => >(0), result)
+    (; day0, result)
 end
-
-function Report(data::APData)
-    levels = @p data.summary keys collect
-    ndays = size(getindex(data.daily.accuracy, levels[1]), 1)
-    stats = vcat([["Accuracy($i)", "standard deviation($i)", "RSD($i)"] for i in 1:ndays]..., getindex(data.summary, levels[1]).Stats)
-    new = Pair{Symbol, Any}[:Stats => stats]
-    drugs = @p getindex(data.summary, levels[1]) propertynames collect
-    popfirst!(drugs)
-    for drug in drugs
-        for level in levels
-            daily_acc = getproperty(data.daily.accuracy[level], drug)
-            daily_std = getproperty(data.daily.std[level], drug)
-            daily_rsd = getproperty(data.daily.rsd[level], drug)
-            stat = vcat([[daily_acc[i], daily_std[i], daily_rsd[i]] for i in 1:ndays]..., getproperty(getindex(data.summary, level), drug))
-            push!(new, Symbol(string(drug) * "_" * level) => stat)
-        end
-    end
-    Report(data, Table(; new...))
-end
-
-Report(data::RecoveryData) = Report(data, ratio_report(data.data))
-Report(data::MEData) = Report(data, ratio_report(data.data))
-
-function ratio_report(data::TypedTables.Dictionary)
-    levels = @p data keys collect
-    new = Pair{Symbol, Any}[:Stats => getindex(data, levels[1]).Stats]
-    drugs = @p getindex(data, levels[1]) propertynames collect
-    popfirst!(drugs)
-    for drug in drugs
-        for level in levels
-            push!(new, Symbol(string(drug) * "_" * level) => getproperty(getindex(data, level), drug))
-        end
-    end
-    Table(; new...)
-end
-
