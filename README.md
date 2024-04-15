@@ -14,25 +14,26 @@ A small package for analytical method validation, and sample analysis.
 For command line interfaces, see [`juliaquant`](https://github.com/yufongpeng/juliaquant).
 
 ## Function
-1. `read`: read csv file(s) into `AnalysisTable`. Currently, only data from MassHunter Software in wide format is supported.
+1. `read`: read csv file(s) into `AnalysisTable` (See [`ChemistryQuantitativeAnalysis.jl`](https://github.com/yufongpeng/ChemistryQuantitativeAnalysis.jl)). Currently, only data from MassHunter Software in wide format is supported.
 
 ### Report functions
 These function accept `AnalysisTable` or `Batch`.
-2. `qc_report`: calculate accuracy and rsd of QC samples.
-3. `ap_report`: calculate accuracy, repeatability and reproducibility.
-4. `recovery_report`: calculate recovery by prespiked/postspiked.
-5. `me_report`: calculate matrix effect by with_matrix/std_solution.
-6. `stability_report`: calculate accuracy and rsd of QC samples in different tempearture and restoration days.
-7. `sample_report`: average each sample.
+1. `qc_report`: calculate accuracy and rsd of QC samples.
+2. `ap_report`: calculate accuracy, repeatability and reproducibility.
+3. `recovery_report`: calculate recovery by prespiked/postspiked.
+4. `me_report`: calculate matrix effect by with_matrix/std_solution.
+5. `stability_report`: calculate accuracy and rsd of QC samples in different tempearture and restoration days.
+6. `sample_report`: average each sample.
 
 ### Util functions
 1. `pivot`: transform dataframe into wide format.
-2. `merge_stats`: merge spcific statistics.
-3. `mean_plus_minus_std`: round and merge mean values and standard deviations with "±".
-4. `add_percentage`: add "%".
-5. `normalize`: normalize dataframe by the given normalizer.
-6. `qualify`: replace data out of acceptable range.
-6. `qualify!`: replace data out of acceptable range.
+2. `unpivot`: transform dataframe into long format. 
+3. `selectby`: select values by specific column, and apply `select!` as if the values are columns. This function is useful to merge multiple statistical values into specific formats.
+4. `mean_plus_minus_std`: round and merge mean values and standard deviations with "±".
+5. `add_percentage`: add "%".
+6. `normalize`: normalize dataframe by the given normalizer.
+7. `qualify`: replace data out of acceptable range.
+8. `qualify!`: replace data out of acceptable range.
 
 ## Computation
 ### Intra-day

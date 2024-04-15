@@ -31,8 +31,9 @@ Transform `DataFrame` into wide format.
 function pivot(df::DataFrame, cols; rows = [], prefix = true, notsort = ["Stats", "File"], drop = [])
     df = _pivot(df, cols; rows, prefix, drop)
     ord = filter(!startswith("Data"), names(df))
+    notsort = string.(notsort)
     filter!(x -> !in(x, notsort), ord)
-    sort!(df, ord)
+    isempty(ord) ? df : sort!(df, ord)
 end
 function _pivot(df::DataFrame, col; rows = [], prefix = true, drop = [])
     cols = names(df)
@@ -88,8 +89,9 @@ function unpivot(df::DataFrame, col; rows = [], notsort = ["Stats", "File"], dro
     df = _unpivot(df, col)
     select!(df, rows, Not(drop))
     ord = filter(!startswith("Data"), names(df))
+    notsort = string.(notsort)
     filter!(x -> !in(x, notsort), ord)
-    sort!(df, ord)
+    isempty(ord) ? df : sort!(df, ord)
 end
 
 function unpivot(df::DataFrame, cols::AbstractVector; rows = [], notsort = ["Stats", "File"], drop = [])
@@ -98,8 +100,9 @@ function unpivot(df::DataFrame, cols::AbstractVector; rows = [], notsort = ["Sta
     end
     select!(df, rows, Not(drop))
     ord = filter(!startswith("Data"), names(df))
+    notsort = string.(notsort)
     filter!(x -> !in(x, notsort), ord)
-    sort!(df, ord)
+    isempty(ord) ? df : sort!(df, ord)
 end
 
 function _unpivot(df::DataFrame, col)
@@ -146,29 +149,93 @@ Add "%" to `s`.
 add_percentage(s; ispct = false, digits = 2) = ispct ? (@. string(round(s; digits), "%")) : (@. string(round(s * 100; digits), "%"))
 
 """
-    merge_stats(df::DataFrame, col_pairs...; colstats = :Stats, kwargs...)
+    selectby(df::DataFrame, col, col_pairs...; 
+            pivot = false, 
+            rows = [], 
+            notsort = ["Stats", "File"], 
+            prefix = true, 
+            drop = [], 
+            kwargs...)
 
-Merge spcific statistics.
+Select values by `col`, and apply `select!` as if the values are columns.
 
 # Arguments
 * `df`: target `DataFrame`.
+* `col`: column name.
 * `col_pairs`: `DataFrames.jl` syntax to manipulate columns. They will be put in internal `select!` function.
-* `colstats`: column name of statistics.
+
+# Keyword Arguments
+* `rows`: the column(s) (Symbol, String, or Vector) preserving as row keys.
+* `pivot`: whether pivot the dataframe by `col`.
+* `notsort`: columns (Vector); do not sort by these columns.
+* `drop`: columns (Vector); drop these columns.
 * `kwargs`: keyword arguments for internal `select!` function.
 """
-function merge_stats(df::DataFrame, col_pairs...; colstats = :Stats, kwargs...)
-    cols = propertynames(df)
-    value_id = findfirst(==(:Data), cols)
-    row_id = setdiff(eachindex(cols), value_id)
-    col_id = findfirst(==(colstats), cols)
-    setdiff!(row_id, col_id)
-    df = unstack(df, row_id, col_id, value_id)
+function selectby(df::DataFrame, col, col_pairs...; 
+                    pivot = nothing, 
+                    rows = [], 
+                    notsort = ["Stats", "File"], 
+                    prefix = true, 
+                    drop = [], 
+                    kwargs...)
+    col = string(col)
+    cols = names(df)
+    col_id = findfirst(==(col), cols)
+    dfs = if isnothing(col_id)
+        pivot = isnothing(pivot) ? true : pivot
+        value_id = findall(startswith("Data"), cols)
+        row_id = setdiff(eachindex(cols), value_id)
+        valuecols = map(value_id) do i
+            replace(cols[i], Regex("\\|" * col * "=[^\\|]*") => "")
+        end
+        newcols = map(value_id) do i
+            only(match(Regex("\\|" * col * "=([^\\|]*)"), cols[i]))
+        end
+        colmap = Dictionary{String, Vector{Int}}()
+        for (i, v) in enumerate(valuecols)
+            push!(get!(colmap, v, Int[]), i)
+        end
+        map(pairs(colmap)) do (k, v)
+            _select_pivot_unpivot!(select(df, row_id, value_id[v] .=> identity .=> newcols[v]), row_id, cols[row_id], col, k, col_pairs...; pivot, prefix, kwargs...)
+        end
+    else
+        pivot = isnothing(pivot) ? false : pivot
+        value_ids = findall(startswith("Data"), cols)
+        row_id = setdiff(eachindex(cols), value_ids)
+        setdiff!(row_id, col_id)
+        map(value_ids) do value_id
+            _select_pivot_unpivot!(unstack(df, row_id, col_id, value_id), row_id, cols[row_id], col, cols[value_id], col_pairs...; pivot, prefix, kwargs...)
+        end
+    end
+    df = if length(dfs) == 1
+        only(dfs)
+    else
+        cols = names(last(dfs))
+        value_ids = findall(startswith("Data"), cols)
+        row_id = setdiff(eachindex(cols), value_ids)
+        col_id = findfirst(==(colstats), cols)
+        setdiff!(row_id, col_id)
+        outerjoin(dfs...; on = cols[row_id])
+    end
+    select!(df, rows, Not(drop))
+    ord = filter(!startswith("Data"), names(df))
+    notsort = string.(notsort)
+    filter!(x -> !in(x, notsort), ord)
+    isempty(ord) ? df : sort!(df, ord)
+end
+
+function _select_pivot_unpivot!(df, row_id, row_cols, col, value_name, col_pairs...; pivot = false, prefix = true, kwargs...)
     select!(df, row_id, col_pairs...; kwargs...)
-    cols2 = propertynames(df)
-    row_id2 = findall(in(cols[row_id]), cols2)
-    col_id2 = setdiff(eachindex(cols2), row_id2)
-    df = stack(df, col_id2, row_id2; variable_name = colstats, value_name = :Data)
-    sort!(df, row_id2)
+    cols = names(df)
+    row_id = findall(in(row_cols), cols)
+    col_id = setdiff(eachindex(cols), row_id)
+    if pivot && prefix
+        rename!(df, cols[col_id] .=> string(value_name, "|", col, "=") .* cols[col_id])
+    elseif pivot
+        rename!(df, cols[col_id] .=> string(value_name, "|") .* cols[col_id])
+    else
+        stack(df, col_id, row_id; variable_name = col, value_name = value_name)
+    end
 end
 
 """
@@ -192,7 +259,7 @@ function normalize(df::DataFrame, normalizer::DataFrame; id = [:Analyte, :Level]
         stats = (unique(getproperty(df, colstats)), stats[2])
     end
     for (i, j) in zip(eachindex(ngdf), eachindex(tgdf))                                                                                 
-        tgdf[j].Data[in.(getproperty(tgdf[j], colstats), Ref(stats[1]))] ./= ngdf[i].Data ./ 100                                                                        
+        tgdf[j].Data[in.(getproperty(tgdf[j], colstats), Ref(stats[1]))] ./= ngdf[i].Data                                                                    
     end
     df
 end
@@ -260,4 +327,3 @@ function qualify!(df::DataFrame;
     end
     df
 end
-

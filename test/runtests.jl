@@ -25,14 +25,16 @@ const CQA = ChemistryQuantitativeAnalysis
     end
     @test collect(sp[1, [2, 4]]) == [1.5, 0.3]
     @test ismissing(sp[4, 4])
-    m = merge_stats(st.result, ["Accuracy(%)", "Standard Deviation(%)"] => mean_plus_minus_std)
+    m = selectby(st.result, :Stats, ["Accuracy(%)", "Standard Deviation(%)"] => mean_plus_minus_std => "Accuracy(%)")
     pv = pivot(m, [:Analyte, :Level]; drop = :Stats)
     @test m[all.(zip(m.Analyte .== "A", m.Condition .== "4C", m.Level .== "0-2")), "Data"][begin] == pv[pv.Condition .== "4C", "Data|Analyte=A|Level=0-2"][begin]
-    # @test unpivot(pv, "Level") == pivot(m, "Analyte"; drop = :Stats)
+    @test unpivot(pv, "Level") == pivot(m, "Analyte"; drop = :Stats)
     @test m.Data == unpivot(pv, ["Level", "Analyte"]; rows = :Analyte).Data
-    mqc = @chain qc begin
-        merge_stats(["Mean", "Standard Deviation"] => mean_plus_minus_std => "Mean", "Relative Standard Deviation" => add_percentage => "RSD")
-        pivot(:Stats; prefix = false)
+    qc1 = selectby(qc, :Stats, ["Mean", "Standard Deviation"] => mean_plus_minus_std => "Mean", "Relative Standard Deviation" => add_percentage => "RSD"; pivot = true, prefix = false)
+    qc2 = @chain qc begin
+        pivot(:Stats)
+        selectby(:Stats, ["Mean", "Standard Deviation"] => mean_plus_minus_std => "Mean", "Relative Standard Deviation" => add_percentage => "RSD")
     end
-    @test mqc[1, "Data|RSD"] == "4.37%"
+    @test qc1[1, "Data|RSD"] == "4.37%"
+    @test qc2[2, "Data|Stats=RSD"] == "5.06%"
 end
