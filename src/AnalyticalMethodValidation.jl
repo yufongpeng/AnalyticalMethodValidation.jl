@@ -1,6 +1,6 @@
 module AnalyticalMethodValidation
-using DataPipes, Statistics, CSV, DataFrames, Chain, ChemistryQuantitativeAnalysis, Dictionaries
-export read_masshunter, qc_report, sample_report, ap_report, me_report, recovery_report, stability_report, 
+using Statistics, CSV, DataFrames, Chain, ChemistryQuantitativeAnalysis, Dictionaries
+export read_masshunter, qc_report, sample_report, ap_report, me_report, recovery_report, stability_report, relative_stability_report,
         pivot, unpivot,
         mean_plus_minus_std, add_percentage, selectby, normalize, qualify!, qualify
 const CQA = ChemistryQuantitativeAnalysis
@@ -34,9 +34,9 @@ function read_masshunter(file; datatype = Dictionary{String, Symbol}(), numtype)
         t[i] = split(l, ",")
     end    
     #t[2] = replace.(t[2], r".*Con.*" => "Concentration")
-    ic = @p t[1] findall(occursin("Results", _)) 
+    ic = findall(x -> occursin("Results", x), t[1]) 
     #id_info = @p t[1] findfirst(occursin("Results", _))
-    cname = @p ic map(replace(t[1][_], " Results" => ""))
+    cname = map(x -> replace(t[1][x], " Results" => ""), ic)
     n_datatype = round(Int, (length(t[1]) - ic[1] + 1) / length(ic)) - 1
     dname = t[2][ic[1]:ic[1] + n_datatype]
     datafile = findfirst(x -> occursin("Data File", string(x)), t[2])
@@ -70,9 +70,9 @@ function read_masshunter(files::AbstractVector; datatype = Dictionary{String, Sy
             t[i] = split(l, ",")
         end    
         #t[2] = replace.(t[2], r".*Con.*" => "Concentration")
-        ic = @p t[1] findall(occursin("Results", _)) 
+        ic = findall(x -> occursin("Results", x), t[1]) 
         #id_info = @p t[1] findfirst(occursin("Results", _))
-        cname = @p ic map(replace(t[1][_], " Results" => ""))
+        cname = map(x -> replace(t[1][x], " Results" => ""), ic)
         n_datatype = round(Int, (length(t[1]) - ic[1] + 1) / length(ic)) - 1
         dname = t[2][ic[1]:ic[1] + n_datatype]
         datafile = findfirst(x -> occursin("Data File", string(x)), t[2])

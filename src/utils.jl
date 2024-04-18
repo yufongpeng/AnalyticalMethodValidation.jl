@@ -213,8 +213,8 @@ function selectby(df::DataFrame, col, col_pairs...;
         cols = names(last(dfs))
         value_ids = findall(startswith("Data"), cols)
         row_id = setdiff(eachindex(cols), value_ids)
-        col_id = findfirst(==(colstats), cols)
-        setdiff!(row_id, col_id)
+        col_id = findfirst(==(col), cols)
+        isnothing(col_id) || setdiff!(row_id, col_id)
         outerjoin(dfs...; on = cols[row_id])
     end
     select!(df, rows, Not(drop))
@@ -232,7 +232,7 @@ function _select_pivot_unpivot!(df, row_id, row_cols, col, value_name, col_pairs
     if pivot && prefix
         rename!(df, cols[col_id] .=> string(value_name, "|", col, "=") .* cols[col_id])
     elseif pivot
-        rename!(df, cols[col_id] .=> string(value_name, "|") .* cols[col_id])
+        all(isempty, cols[col_id]) ? rename!(df, cols[col_id] .=> string(value_name)) : rename!(df, cols[col_id] .=> string(value_name, "|") .* cols[col_id])
     else
         stack(df, col_id, row_id; variable_name = col, value_name = value_name)
     end
@@ -250,14 +250,16 @@ Normalize `DataFrame` by the given normalizer.
 * `stats`: a `Tuple` represented as statistics involved in normalization. The first argument applies to `df`, and the second applies to `normalizer`. `All()` indicates including all statistics.
 * `colstats`: column name of statistics.
 """
-function normalize(df::DataFrame, normalizer::DataFrame; id = [:Analyte, :Level], stats = (All(), "Accuracy"), colstats = :Stats)
+function normalize(df::DataFrame, normalizer::DataFrame; id = [:Analyte, :Level], stats = (All(), "Accuracy"), colstats = :Stats, filterstats = true)
+    if stats[1] isa All
+        stats = (unique(getproperty(df, colstats)), string(stats[2]))
+    else
+        stats = (map(string, vectorize(stats[1])), string(stats[2]))
+    end
     normalizer = filter(colstats => ==(stats[2]), normalizer)
-    df = deepcopy(df)
+    df = filterstats ? filter(colstats => x -> in(x, stats[1]), df) : deepcopy(df)
     ngdf = groupby(normalizer, id)
     tgdf = groupby(df, id)
-    if stats[1] isa All
-        stats = (unique(getproperty(df, colstats)), stats[2])
-    end
     for (i, j) in zip(eachindex(ngdf), eachindex(tgdf))                                                                                 
         tgdf[j].Data[in.(getproperty(tgdf[j], colstats), Ref(stats[1]))] ./= ngdf[i].Data                                                                    
     end
@@ -327,3 +329,6 @@ function qualify!(df::DataFrame;
     end
     df
 end
+
+vectorize(x) = [x]
+vectorize(x::AbstractArray) = x

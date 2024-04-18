@@ -18,11 +18,12 @@ For command line interfaces, see [`juliaquant`](https://github.com/yufongpeng/ju
 
 ### Report functions
 These function accept `AnalysisTable` or `Batch`.
-1. `qc_report`: calculate accuracy and rsd of QC samples.
-2. `ap_report`: calculate accuracy, repeatability and reproducibility.
-3. `recovery_report`: calculate recovery by prespiked/postspiked.
-4. `me_report`: calculate matrix effect by with_matrix/std_solution.
-5. `stability_report`: calculate accuracy and rsd of QC samples in different tempearture and restoration days.
+1. `qc_report`: compute statistics of QC samples.
+2. `ap_report`: compute accuracy, repeatability and reproducibility.
+3. `recovery_report`: compute recovery by prespiked/postspiked.
+4. `me_report`: compute matrix effect by with_matrix/std_solution.
+5. `stability_report`: compute stability in different condition and restoration days.
+6. `relative_stability_report`: compute stability relative to day0 data.
 6. `sample_report`: average each sample.
 
 ### Util functions
