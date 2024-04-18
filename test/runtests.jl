@@ -28,7 +28,7 @@ const CQA = ChemistryQuantitativeAnalysis
     m = selectby(st.result, :Stats, ["Accuracy(%)", "Standard Deviation(%)"] => mean_plus_minus_std => "Accuracy(%)")
     pv = pivot(m, [:Analyte, :Level]; drop = :Stats)
     @test m[all.(zip(m.Analyte .== "A", m.Condition .== "4C", m.Level .== "0-2")), "Data"][begin] == pv[pv.Condition .== "4C", "Data|Analyte=A|Level=0-2"][begin]
-    @test unpivot(pv, "Level") == pivot(m, "Analyte"; drop = :Stats)
+    @test unpivot(pv, "Level") == pivot(m, ["Analyte"]; drop = :Stats)
     @test m.Data == unpivot(pv, ["Level", "Analyte"]; rows = :Analyte).Data
     qc1 = selectby(qc, :Stats, ["Mean", "Standard Deviation"] => mean_plus_minus_std => "Mean", "Relative Standard Deviation" => add_percentage => "RSD"; pivot = true, prefix = false)
     qc2 = @chain qc begin
@@ -37,4 +37,5 @@ const CQA = ChemistryQuantitativeAnalysis
     end
     @test qc1[1, "Data|RSD"] == "4.37%"
     @test qc2[2, "Data|Stats=RSD"] == "5.06%"
+    @test all(normalize(re, re; stats = (All(), "Recovery(%)")).Data[1:2:end] .== 1.0)
 end

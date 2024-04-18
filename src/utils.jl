@@ -48,7 +48,7 @@ function _pivot(df::DataFrame, col; rows = [], prefix = true, drop = [])
 end
 
 function _pivot(df::DataFrame, cols::AbstractVector; rows = [], prefix = true, drop = [])
-    length(cols) == 1 && return _pivot(df, only(cols); rows, prefix)
+    length(cols) == 1 && return _pivot(df, only(cols); rows, prefix, drop)
     dfs = [df]
     row_id = Int[]
     colss = names(df)
@@ -60,10 +60,10 @@ function _pivot(df::DataFrame, cols::AbstractVector; rows = [], prefix = true, d
         col_id = findfirst(==(String(col)), colss)
         setdiff!(row_id, col_id)
         dfs = mapreduce(append!, dfs) do df
-                colss = names(df)
-                prefix ? [unstack(df, row_id, col_id, v, renamecols = x -> Symbol(colss[v], :|, colss[col_id], :(=), x)) for v in value_id] : 
-                        [unstack(df, row_id, col_id, v, renamecols = x -> Symbol(colss[v], :|, x)) for v in value_id]
-            end
+            colss = names(df)
+            prefix ? [unstack(df, row_id, col_id, v, renamecols = x -> Symbol(colss[v], :|, colss[col_id], :(=), x)) for v in value_id] : 
+                    [unstack(df, row_id, col_id, v, renamecols = x -> Symbol(colss[v], :|, x)) for v in value_id]
+        end
     end
     df = length(dfs) == 1 ? only(dfs) : outerjoin(dfs...; on = colss[row_id])
     select!(df, rows, Not(drop))
@@ -251,7 +251,7 @@ Normalize `DataFrame` by the given normalizer.
 * `colstats`: column name of statistics.
 """
 function normalize(df::DataFrame, normalizer::DataFrame; id = [:Analyte, :Level], stats = (All(), "Accuracy"), colstats = :Stats)
-    normalizer = filter(colstats => ==(stats[1]), normalizer)
+    normalizer = filter(colstats => ==(stats[2]), normalizer)
     df = deepcopy(df)
     ngdf = groupby(normalizer, id)
     tgdf = groupby(df, id)
