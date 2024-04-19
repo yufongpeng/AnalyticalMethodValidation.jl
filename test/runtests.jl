@@ -13,8 +13,7 @@ const CQA = ChemistryQuantitativeAnalysis
     ap = ap_report(dfs)
     re = recovery_report(df1)
     me = me_report(df1; matrix = r"Pre.*_(.*)_.*", stds = r"Post.*_(.*)_.*")
-    st = stability_report(df2; d0 = r"Pre.*_(.*)_.*", id = r"S.*_(.*)_D(.*)_(.*)_.*")
-    rst = relative_stability_report(df2; d0 = r"Pre.*_(.*)_.*", id = r"S.*_(.*)_D(.*)_(.*)_.*")
+    st = stability_report(df2; day0 = r"Pre.*_(.*)_.*", stored = r"S.*_(.*)_D(.*)_(.*)_.*")
     @test isapprox(std(ap.daily.Data[1:2:5]), ap.summary.Data[3])
     @test isapprox(ap.summary.Data[3] ^ 2 - ap.summary.Data[1] ^ 2 / 5, ap.summary.Data[4] ^ 2)
     @test isapprox(sqrt(ap.summary.Data[4] ^ 2 + ap.summary.Data[1] ^ 2) * 100 / ap.summary.Data[2], ap.summary.Data[6])
@@ -24,8 +23,8 @@ const CQA = ChemistryQuantitativeAnalysis
     d0_t = filter("File" => Base.Fix1(occursin, r"Pre.*_(.*)_.*"), CQA.table(df2.accuracy))
     d7_t = filter("File" => Base.Fix1(occursin, r"S.*_(.*)_D(.*)_(.*)_.*"), CQA.table(df2.accuracy))
     @test isapprox(mean(d0_t.A[6:10]) * 100, st.day0.Data[1])
-    @test isapprox(mean(d7_t.A[1:3]) * 100, st.result.Data[9])
-    @test isapprox(st.result.Data[9] / st.day0.Data[1] * 100, rst.Data[9])
+    @test isapprox(mean(d7_t.A[1:3]) * 100, st.stored.Data[9])
+    @test isapprox(st.stored.Data[9] / st.day0.Data[1] * 100, st.stored_over_day0.Data[9])
     sample = AMV.read(joinpath("data", "sample.csv"))
     sp = @chain sample begin
         sample_report
@@ -34,7 +33,7 @@ const CQA = ChemistryQuantitativeAnalysis
     end
     @test collect(sp[1, [2, 4]]) == [1.5, 0.3]
     @test ismissing(sp[4, 4])
-    m = selectby(st.result, :Stats, ["Accuracy(%)", "Standard Deviation(%)"] => mean_plus_minus_std => "Accuracy(%)")
+    m = selectby(st.stored, :Stats, ["Accuracy(%)", "Standard Deviation(%)"] => mean_plus_minus_std => "Accuracy(%)")
     pv = pivot(m, [:Analyte, :Level]; drop = :Stats)
     @test m[all.(zip(m.Analyte .== "A", m.Condition .== "4C", m.Level .== "0-2")), "Data"][begin] == pv[pv.Condition .== "4C", "Data|Analyte=A|Level=0-2"][begin]
     @test unpivot(pv, "Level") == pivot(m, ["Analyte"]; drop = :Stats)

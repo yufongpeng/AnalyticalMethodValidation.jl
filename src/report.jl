@@ -312,8 +312,8 @@ end
 
 """
     stability_report(at::AnalysisTable; 
-                        d0 = r"S.*_(.*)_.*", 
-                        id = r"S.*_(.*)_(.*)_(.*)_.*", 
+                        day0 = r"S.*_(.*)_.*", 
+                        stored = r"S.*_(.*)_(.*)_(.*)_.*", 
                         order = "CDL", 
                         type = :accuracy, 
                         pct = true,                             
@@ -324,12 +324,14 @@ end
                         collevel = :Level,
                         isaccuracy = true
                     )
-Compute stability. A `NamedTuple` is returned with two elements: `day0` is a `DataFrame` conataing day0 data, and `result` is a `DataFrame` conataing data of other days. 
+Compute stability. A `NamedTuple` is returned with three elements: `day0` is a `DataFrame` conataing day0 samples, `stored` is a `DataFrame` conataing stored samples, and `stored_over_day0` is `stored` divided by `day0`. 
+
+if `day0` is not available, both `day0` and `stored_over_day0` are `nothing`.
 
 # Arguments
 * `at`: `AnalysisTable`.
-* `d0`: `Regex` identifier for day0 samples. The concentration level is captured in the identifier.
-* `id`: `Regex` identifier for the stability samples. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by `order`.
+* `day0`: `Regex` identifier for day0 samples. The concentration level is captured in the identifier.
+* `stored`: `Regex` identifier for stored samples. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by `order`.
 * `order`: a string for setting the order of captured values from `id`; C is storage condition; D is storage days; L is concentration level
 * `type`: data type for calculation.
 * `pct`: whether converting ratio data into percentage (*100).
@@ -341,8 +343,8 @@ Compute stability. A `NamedTuple` is returned with two elements: `day0` is a `Da
 * `isaccuracy`: whether the input data is accuracy.
 """
 function stability_report(at::AnalysisTable; 
-                            d0 = r"S.*_(.*)_.*", 
-                            id = r"S.*_(.*)_(.*)_(.*)_.*", 
+                            day0 = r"S.*_(.*)_.*", 
+                            stored = r"S.*_(.*)_(.*)_(.*)_.*", 
                             order = "CDL", 
                             type = :accuracy, 
                             pct = true,                             
@@ -358,9 +360,9 @@ function stability_report(at::AnalysisTable;
     colcondition = Symbol(colcondition)
     colday = Symbol(colday)
     collevel = Symbol(collevel)
-    pct = pct && isaccuracy
+    npct = pct && isaccuracy
     col = [isaccuracy ? "Accuracy" : "Mean", "Standard Deviation"]
-    if pct
+    if npct
         col .*= "(%)"
     end
     dt = getproperty(at, Symbol(type))
@@ -370,107 +372,94 @@ function stability_report(at::AnalysisTable;
     end
     analytes = analytename(at)
     level = samplecol(dt)
-    stability_df = filter(level => Base.Fix1(occursin, d0), df)
-    d0_data = Dict(:__C => "", :__D => 0, :__L => getindex.(match.(d0, getproperty(stability_df, level)), 1))
-    insertcols!(stability_df, 1, map(Symbol.("__", split(order, ""))) do p
-        p => d0_data[p]
-    end...)
-    rename!(stability_df, :__C => colcondition, :__D => colday, :__L => collevel)
-    select!(stability_df, Not([level]))
-    ulevel = unique(getproperty(stability_df, collevel))
-    stability_df2 = filter(level => Base.Fix1(occursin, id), df)
-    insertcols!(stability_df2, 1, (Symbol.("__", split(order, "")) .=> map(1:length(order)) do i 
-        getindex.(match.(id, stability_df2[!, level]), i)
+    dayn = extract_dayn(df, level; stored, order, colcondition, colday, collevel)
+    ulevel = unique(getproperty(dayn, collevel))
+    if !isnothing(day0)
+        day0 = extract_day0(df, level; day0, order, colcondition, colday, collevel)
+        intersect!(ulevel, unique(getproperty(day0, collevel)))
+        dayn = @chain day0 begin
+            append!(dayn)
+            filter!(collevel => in(ulevel), _)
+            sort!(colday)
+            stack(analytes, [colcondition, colday, collevel]; variable_name = colanalyte, value_name = :Data) 
+        end
     end
-    )...)
-    rename!(stability_df2, :__C => colcondition, :__D => colday, :__L => collevel)
-    select!(stability_df2, Not([level]))
-    stability_df2[!, colday] .= map(x -> parse(Int, x), getproperty(stability_df2, colday))
-    intersect!(ulevel, unique(getproperty(stability_df2, collevel)))
-    stability_df = @chain stability_df begin
-        append!(stability_df2)
-        filter!(collevel => in(ulevel), _)
-        sort!(colday)
-        stack(analytes, [colcondition, colday, collevel]; variable_name = colanalyte, value_name = :Data) 
-    end
-    pct && (stability_df.Data .*= 100)
-    gdf = groupby(stability_df, [colanalyte, colcondition, colday, collevel])
+    npct && (dayn.Data .*= 100)
+    gdf = groupby(dayn, [colanalyte, colcondition, colday, collevel])
     accuracy = combine(gdf, :Data => mean, renamecols = false)
     stds = combine(gdf, :Data => std, renamecols = false)
     insertcols!(accuracy, colstats => col[1])
     insertcols!(stds, colstats => col[2])
-    result = @chain vcat(accuracy, stds) begin
+    dayn = @chain vcat(accuracy, stds) begin
         select!([colanalyte, colcondition, colday, collevel, colstats, :Data])
         sort!([colanalyte, colcondition, colday, collevel])
     end
-    day0 = filter(colday => ==(0), result)
-    filter!(colday => >(0), result)
-    (; day0, result)
+    isnothing(day0) && return (day0 = nothing, stored = dayn, stored_over_day0 = nothing)
+    day0 = filter(colday => ==(0), dayn)
+    filter!(colday => >(0), dayn)
+    (day0 = day0, stored = dayn, stored_over_day0 = relative_stability(day0, dayn; pct, colanalyte, colstats, colcondition, colday, collevel, isaccuracy))
 end
 
-"""
-    relative_stability_report(at::AnalysisTable; 
-                                d0 = r"S.*_(.*)_.*", 
-                                id = r"S.*_(.*)_(.*)_(.*)_.*", 
-                                order = "CDL", 
-                                type = :accuracy, 
-                                pct = true,                             
-                                colanalyte = :Analyte,
-                                colstats = :Stats,
-                                colcondition = :Condition,
-                                colday = :Day,
-                                collevel = :Level,
-                                isaccuracy = true
-                            )
-Compute stability relative to day0 data.
+function extract_day0(df, level; 
+                    day0 = r"S.*_(.*)_.*", 
+                    order = "CDL", 
+                    colcondition = :Condition,
+                    colday = :Day,
+                    collevel = :Level)
+    stability_df = filter(level => Base.Fix1(occursin, day0), df)
+    day0_data = Dict(:__C => "", :__D => 0, :__L => getindex.(match.(day0, getproperty(stability_df, level)), 1))
+    insertcols!(stability_df, 1, map(Symbol.("__", split(order, ""))) do p
+        p => day0_data[p]
+    end...)
+    rename!(stability_df, :__C => colcondition, :__D => colday, :__L => collevel)
+    select!(stability_df, Not([level]))
+end
 
-# Arguments
-* `at`: `AnalysisTable`.
-* `d0`: `Regex` identifier for day0 samples. The concentration level is captured in the identifier.
-* `id`: `Regex` identifier for the stability samples. The storage condition, concentration level, and storage days are captured in the identifier; the order can be set by `order`.
-* `order`: a string for setting the order of captured values from `id`; C is storage condition; D is storage days; L is concentration level
-* `type`: data type for calculation.
-* `pct`: whether converting ratio data into percentage (*100).
-* `colanalyte`: column name of analytes.
-* `colstats`: column name of statistics.
-* `colcondition`: column name of storage condition.
-* `colday`: column name of validation day.
-* `collevel`: column name of level.
-* `isaccuracy`: whether the input data is accuracy.
-"""
-function relative_stability_report(at::AnalysisTable; 
-                                    d0 = r"S.*_(.*)_.*", 
-                                    id = r"S.*_(.*)_(.*)_(.*)_.*", 
-                                    order = "CDL", 
-                                    type = :accuracy, 
-                                    pct = true,                             
-                                    colanalyte = :Analyte,
-                                    colstats = :Stats,
-                                    colcondition = :Condition,
-                                    colday = :Day,
-                                    collevel = :Level,
-                                    isaccuracy = true
-                                )
-    st = stability_report(at; d0, id, order, type, pct, colanalyte, colstats, colcondition, colday, collevel, isaccuracy)
+function extract_dayn(df, level; 
+                    stored = r"S.*_(.*)_(.*)_(.*)_.*", 
+                    order = "CDL", 
+                    colcondition = :Condition,
+                    colday = :Day,
+                    collevel = :Level)
+    stability_df = filter(level => Base.Fix1(occursin, stored), df)
+    insertcols!(stability_df, 1, (Symbol.("__", split(order, "")) .=> map(1:length(order)) do i 
+        getindex.(match.(stored, stability_df[!, level]), i)
+    end
+    )...)
+    rename!(stability_df, :__C => colcondition, :__D => colday, :__L => collevel)
+    select!(stability_df, Not([level]))
+    stability_df[!, colday] .= map(x -> parse(Int, x), getproperty(stability_df, colday))
+    stability_df
+end
+
+function relative_stability(day0, stored;
+                            pct = true,                             
+                            colanalyte = :Analyte,
+                            colstats = :Stats,
+                            colcondition = :Condition,
+                            colday = :Day,
+                            collevel = :Level,
+                            isaccuracy = true
+                            )
     colmean = isaccuracy ? "Accuracy" : "Mean"
     colstd = "Standard Deviation"
     if pct && isaccuracy
         colmean = colmean * "(%)"
         colstd = colstd * "(%)"
     end
-    means = normalize(st.result, st.day0; id = [colanalyte, collevel], colstats, stats = (colmean, colmean))
+    means = normalize(stored, day0; id = [colanalyte, collevel], colstats, stats = (colmean, colmean))
     pct && (means.Data .*= 100)
-    pd0 = selectby(st.day0, colstats, [colstd, colmean] => ((x, y) -> map(/, x, y)) => ""; prefix = false, pivot = true)
-    pr = selectby(st.result, colstats, [colstd, colmean] => ((x, y) -> map(/, x, y)) => ""; prefix = false, pivot = true)
+    pd0 = selectby(day0, colstats, [colstd, colmean] => ((x, y) -> map(/, x, y)) => ""; prefix = false, pivot = true)
+    pst = selectby(stored, colstats, [colstd, colmean] => ((x, y) -> map(/, x, y)) => ""; prefix = false, pivot = true)
     ngdf = groupby(pd0, [colanalyte, collevel])
     mgdf = groupby(means, [colanalyte, collevel])
-    tgdf = groupby(pr, [colanalyte, collevel])
+    tgdf = groupby(pst, [colanalyte, collevel])
     for (i, j, k) in zip(eachindex(ngdf), eachindex(tgdf), eachindex(mgdf))                                                                                 
         tgdf[j].Data .= f_rsd_sum_std.(ngdf[i].Data, tgdf[j].Data, mgdf[k].Data)                                                                   
     end
-    insertcols!(pr, 5, colstats => repeat([colstd], length(pr.Data)))
+    insertcols!(pst, 5, colstats => repeat([colstd], length(pst.Data)))
     means[!, colstats] .= pct ? "Stability(%)" : "Stability"
-    sort!(vcat(means, pr), [colanalyte, colcondition, colday, collevel])
+    sort!(vcat(means, pst), [colanalyte, colcondition, colday, collevel])
 end
 
 for f in [:sample_report, :qc_report, :me_report, :recovery_report, :ap_report, :stability_report, :relative_stability_report]

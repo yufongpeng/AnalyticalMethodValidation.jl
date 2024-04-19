@@ -1,6 +1,6 @@
 module AnalyticalMethodValidation
 using Statistics, CSV, DataFrames, Chain, ChemistryQuantitativeAnalysis, Dictionaries
-export read_masshunter, qc_report, sample_report, ap_report, me_report, recovery_report, stability_report, relative_stability_report,
+export read_masshunter, qc_report, sample_report, ap_report, me_report, recovery_report, stability_report,
         pivot, unpivot,
         mean_plus_minus_std, add_percentage, selectby, normalize, qualify!, qualify
 const CQA = ChemistryQuantitativeAnalysis

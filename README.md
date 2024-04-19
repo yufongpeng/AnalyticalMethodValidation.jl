@@ -23,7 +23,6 @@ These function accept `AnalysisTable` or `Batch`.
 3. `recovery_report`: compute recovery by prespiked/postspiked.
 4. `me_report`: compute matrix effect by with_matrix/std_solution.
 5. `stability_report`: compute stability in different condition and restoration days.
-6. `relative_stability_report`: compute stability relative to day0 data.
 6. `sample_report`: average each sample.
 
 ### Util functions
