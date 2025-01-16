@@ -326,7 +326,7 @@ end
                     )
 Compute stability. A `NamedTuple` is returned with three elements: `day0` is a `DataFrame` conataing day0 samples, `stored` is a `DataFrame` conataing stored samples, and `stored_over_day0` is `stored` divided by `day0`. 
 
-if `day0` is not available, both `day0` and `stored_over_day0` are `nothing`.
+if `day0` is not available, both `day0` and `stored_over_day0` are empty `DataFrame`s.
 
 # Arguments
 * `at`: `AnalysisTable`.
@@ -374,7 +374,12 @@ function stability_report(at::AnalysisTable;
     level = samplecol(dt)
     dayn = extract_dayn(df, level; stored, order, colcondition, colday, collevel)
     ulevel = unique(getproperty(dayn, collevel))
-    if !isnothing(day0)
+    if isnothing(day0)
+        dayn = @chain dayn begin
+            sort!(colday)
+            stack(analytes, [colcondition, colday, collevel]; variable_name = colanalyte, value_name = :Data) 
+        end
+    else
         day0 = extract_day0(df, level; day0, order, colcondition, colday, collevel)
         intersect!(ulevel, unique(getproperty(day0, collevel)))
         dayn = @chain day0 begin

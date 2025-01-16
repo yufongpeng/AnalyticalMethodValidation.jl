@@ -14,6 +14,8 @@ const CQA = ChemistryQuantitativeAnalysis
     re = recovery_report(df1)
     me = me_report(df1; matrix = r"Pre.*_(.*)_.*", stds = r"Post.*_(.*)_.*")
     st = stability_report(df2; day0 = r"Pre.*_(.*)_.*", stored = r"S.*_(.*)_D(.*)_(.*)_.*")
+    st2 = stability_report(df2; day0 = nothing, stored = r"S.*_(.*)_D(.*)_(.*)_.*")
+    @test isnothing(st2.day0)
     @test isapprox(std(ap.daily.Data[1:2:5]), ap.summary.Data[3])
     @test isapprox(ap.summary.Data[3] ^ 2 - ap.summary.Data[1] ^ 2 / 5, ap.summary.Data[4] ^ 2)
     @test isapprox(sqrt(ap.summary.Data[4] ^ 2 + ap.summary.Data[1] ^ 2) * 100 / ap.summary.Data[2], ap.summary.Data[6])
