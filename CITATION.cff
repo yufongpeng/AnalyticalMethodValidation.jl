@@ -8,7 +8,7 @@ message: >-
   metadata from this file.
 type: software
 authors:
-  - given-names: Yu-Fong
+  - given-names: Yu Fong
     family-names: Peng
     email: sciphypar@gmail.com
     orcid: 'https://orcid.org/0000-0002-3597-8047'
