@@ -1,0 +1,31 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: AnalyticalMethodValidation.jl
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Yu-Fong
+    family-names: Peng
+    email: sciphypar@gmail.com
+    orcid: 'https://orcid.org/0000-0002-3597-8047'
+    affiliation: 
+      - School of Pharmacy, College of Medicine, National Taiwan University, Taipei, Taiwan. 
+      - The Metabolomics Core Laboratory, NTU Centers of Genomic and Precision Medicine, National Taiwan University, Taipei, Taiwan.
+repository-code: >-
+  https://github.com/yufongpeng/AnalyticalMethodValidation.jl
+abstract: Analytical method validation and sample analysis
+keywords:
+  - Analytical method validation
+  - Accuracy
+  - Precision
+  - Recovery
+  - Matrix effect
+  - Quality control
+  - Stability
+  - Sample analysis
+license: MIT
+version: 0.1.0
