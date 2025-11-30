@@ -93,9 +93,13 @@ function sample_report(at::AnalysisTable; id = r"Sample_(\d*).*", type = :estima
     end
     mc = combine(gdf, :Data => mean; renamecols = false)
     sc = combine(gdf, :Data => std; renamecols = false)
+    if pct 
+        mc[:, :Data] .*= 100
+        sc[:, :Data] .*= 100
+    end
     insertcols!(mc, colstats => col[1])
     insertcols!(sc, colstats => col[2])
-    vcat(mc, sc) 
+    select!(vcat(mc, sc), [scol, colanalyte, colstats, :Data])
 end
 
 """

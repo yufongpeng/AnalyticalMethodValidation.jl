@@ -36,6 +36,9 @@ const CQA = ChemistryQuantitativeAnalysis
     end
     @test collect(sp[1, [2, 4]]) == [1.5, 0.3]
     @test ismissing(sp[4, 4])
+    sp2 = sample_report(dfs; id = r"Pre.*_(.*)_.*", type = :accuracy, pct = true)
+    @test all(endswith("(%)"), sp2.Stats)
+    @test all(>(1), sp2.Data)
     m = selectby(st.stored, :Stats, ["Accuracy(%)", "Standard Deviation(%)"] => mean_plus_minus_std => "Accuracy(%)")
     pv = pivot(m, [:Analyte, :Level]; drop = :Stats)
     @test m[all.(zip(m.Analyte .== "A", m.Condition .== "4C", m.Level .== "0-2")), "Data"][begin] == pv[pv.Condition .== "4C", "Data|Analyte=A|Level=0-2"][begin]
