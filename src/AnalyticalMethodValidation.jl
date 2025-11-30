@@ -43,10 +43,12 @@ function read_masshunter(file; datatype = Dictionary{String, Symbol}(), numtype)
     tbl_id = CSV.read(file, DataFrame; select = [datafile], skipto = 3)
     at = analysistable(get(datatype, dname[i + 1], Symbol(dname[i + 1])) => begin
         tbl = CSV.read(file, DataFrame; select = ic .+ i, skipto = 3)
-        for col in eachcol(tbl)
-            replace!(col, missing => 0.0)
+        for (i, col) in enumerate(eachcol(tbl))
+            if eltype(col) != Missing
+                replace!(col, missing => 0.0)
+            end
         end
-        SampleDataTable(:File, DataFrame("File" => getproperty(tbl_id, propertynames(tbl_id)[1]), (cname .=> convert.(Vector{numtype}, eachcol(tbl)))...))
+        SampleDataTable(:File, DataFrame("File" => getproperty(tbl_id, propertynames(tbl_id)[1]), (cname .=> convert_vec_missing.(eachcol(tbl), numtype))...))
     end for i in 0:n_datatype)
     if "Accuracy" in dname
         dt = getproperty(at, get(datatype, "Accuracy", :accuracy))
@@ -56,6 +58,9 @@ function read_masshunter(file; datatype = Dictionary{String, Symbol}(), numtype)
     end
     at
 end 
+
+convert_vec_missing(v, numtype = Float64) = convert(Vector{numtype}, v)
+convert_vec_missing(v::AbstractVector{Missing}, numtype = Float64) = zeros(numtype, length(v))
 
 function read_masshunter(files::AbstractVector; datatype = Dictionary{String, Symbol}(), numtype)
     get!(datatype, "Area", :area)

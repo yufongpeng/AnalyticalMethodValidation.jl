@@ -282,7 +282,8 @@ qualify(df::DataFrame; kwargs...) = qualify!(deepcopy(df); kwargs...)
             lodsub = "<LOD", 
             loqsub = "<LOQ", 
             lloqsub = "<LLOQ", 
-            uloqsub = ">ULOQ")
+            uloqsub = ">ULOQ",
+            colfilter = x -> occursin("Mean", x))
 
 Replace data out of acceptable range.
 
@@ -294,6 +295,7 @@ Replace data out of acceptable range.
 * `loqsub`: substitution for value smaller than LOQ.
 * `lloqsub`: substitution for value smaller than LLOQ.
 * `uloqsub`: substitution for value larger than ULOQ.
+* `colfilter`: filtering function for columns to be checked.
 """
 function qualify!(df::DataFrame; 
                     lod = nothing, 
@@ -303,14 +305,15 @@ function qualify!(df::DataFrame;
                     lodsub = "<LOD", 
                     loqsub = "<LOQ", 
                     lloqsub = "<LLOQ", 
-                    uloqsub = ">ULOQ")
+                    uloqsub = ">ULOQ",
+                    colfilter = x -> occursin("Mean", x))
     th = [lod, loq, lloq, uloq]
     p = findall(!isnothing, th)
     isempty(p) && return df
     th = th[p]
     sub = [lodsub, loqsub, lloqsub, uloqsub][p]
     comp = [<, <, <, >][p]
-    cols = filter!(startswith("Data"), names(df))
+    cols = filter!(colfilter, names(df))
     bk = zeros(length(cols))
     fb = [identity for i in cols]
     th = mapreduce(hcat, th) do t

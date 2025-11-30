@@ -52,7 +52,13 @@ function qc_report(at::AnalysisTable;
 end
 
 """
-    sample_report(at::AnalysisTable; id = r"Sample_(\\d*).*", type = :estimated_concentration, colanalyte = :Analyte)
+    sample_report(at::AnalysisTable; 
+                    id = r"Sample_(\\d*).*", 
+                    type = :estimated_concentration, 
+                    pct = false,
+                    colanalyte = :Analyte,
+                    colstats = :Stats
+                )
 
 Compute mean of sample data.
 
@@ -60,10 +66,17 @@ Compute mean of sample data.
 * `at`: `AnalysisTable`.
 * `id`: `Regex` identifier for the QC samples.
 * `type`: data type for calculation.
+* `pct`: whether converting ratio data into percentage (*100).
 * `colanalyte`: column name of analytes.
+* `colstats`: column name of statistics.
 """
-function sample_report(at::AnalysisTable; id = r"Sample_(\d*).*", type = :estimated_concentration, colanalyte = :Analyte)
+function sample_report(at::AnalysisTable; id = r"Sample_(\d*).*", type = :estimated_concentration, pct = false, colanalyte = :Analyte, colstats = :Stats)
+    col = ["Mean", "Standard Deviation"]
+    if pct 
+        col .*= "(%)"
+    end
     colanalyte = Symbol(colanalyte)
+    colstats = Symbol(colstats)
     dt = getproperty(at, Symbol(type))
     df = CQA.table(dt)
     if !isa(df, DataFrame)
@@ -73,12 +86,16 @@ function sample_report(at::AnalysisTable; id = r"Sample_(\d*).*", type = :estima
     scol = samplecol(dt)
     sample = filter(scol => Base.Fix1(occursin, id), df)
     sample[:, scol] = map(x -> match(id, x)[1], sample[!, scol])
-    @chain sample begin
+    gdf = @chain sample begin
         stack(analytes, scol; variable_name = colanalyte, value_name = :Data)
         select!([scol, colanalyte, :Data])
         groupby([scol, colanalyte])
-        combine(:Data => mean; renamecols = false)
     end
+    mc = combine(gdf, :Data => mean; renamecols = false)
+    sc = combine(gdf, :Data => std; renamecols = false)
+    insertcols!(mc, colstats => col[1])
+    insertcols!(sc, colstats => col[2])
+    vcat(mc, sc) 
 end
 
 """
@@ -292,6 +309,9 @@ function ratio_data(at::AnalysisTable;
     post_df = filter(collevel => Base.Fix1(occursin, post), df)
     pre_df[:, collevel] = getindex.(match.(pre, pre_df[!, collevel]), 1)
     post_df[:, collevel] = getindex.(match.(post, post_df[!, collevel]), 1)
+    ilevel = intersect(pre_df[!, collevel], post_df[!, collevel])
+    filter!(collevel => in(ilevel), pre_df)
+    filter!(collevel => in(ilevel), post_df)
     sort!(pre_df, collevel)
     sort!(post_df, collevel)
     pre_gdf = groupby(pre_df, [colanalyte, collevel])

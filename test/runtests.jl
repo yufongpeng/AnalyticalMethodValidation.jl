@@ -30,7 +30,8 @@ const CQA = ChemistryQuantitativeAnalysis
     sample = AMV.read(joinpath("data", "sample.csv"))
     sp = @chain sample begin
         sample_report
-        pivot(:Analyte)
+        selectby(:Stats, "Mean")
+        pivot([:Analyte, :Stats])
         qualify(; lod = [1.5, 0.03, 0.3], loq = [5, 0.1, 1], lodsub = missing, loqsub = [1.5, 0.03, 0.3])
     end
     @test collect(sp[1, [2, 4]]) == [1.5, 0.3]
