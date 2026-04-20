@@ -10,7 +10,7 @@ include("utils.jl")
 """
     read(file, source = :mh)
 
-Read data into `AnalysisTable` from various sourece.
+Read data into `AnalysisTable` from various source.
 
 Currently, only data from Agilent MassHunter Quantitative analysis is implemented. The table needs to be flat. There must be a column whose name contains \"Data File\" as id for each file.
 

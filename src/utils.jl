@@ -41,9 +41,10 @@ function _pivot(df::DataFrame, col; rows = [], prefix = true, drop = [])
     row_id = setdiff(eachindex(cols), value_id)
     col_id = findfirst(==(String(col)), cols)
     setdiff!(row_id, col_id)
+    rowcols = cols[row_id]
     dfs = prefix ? [unstack(df, row_id, col_id, v, renamecols = x -> Symbol(cols[v], :|, cols[col_id], :(=), x)) for v in value_id] : 
                     [unstack(df, row_id, col_id, v, renamecols = x -> Symbol(cols[v], :|, x)) for v in value_id]
-    df = length(dfs) == 1 ? only(dfs) : outerjoin(dfs...; on = cols[row_id])
+    df = length(dfs) == 1 ? only(dfs) : outerjoin(dfs...; on = rowcols)
     select!(df, rows, Not(drop))
 end
 
@@ -116,12 +117,13 @@ function _unpivot(df::DataFrame, col)
     newcols = map(value_id) do i
         only(match(Regex("\\|" * col * "=([^\\|]*)"), cols[i]))
     end
+    rowcols = cols[row_id]
     colmap = Dictionary{String, Vector{Int}}()
     for (i, v) in enumerate(valuecols)
         push!(get!(colmap, v, Int[]), i)
     end
     dfs = [stack(select(df, row_id, value_id[v] .=> identity .=> newcols[v]), newcols[v]; variable_name = col, value_name = k) for (k, v) in pairs(colmap)]
-    df = length(dfs) == 1 ? only(dfs) : outerjoin(dfs...; on = vcat(cols[row_id], col))
+    df = length(dfs) == 1 ? only(dfs) : outerjoin(dfs...; on = vcat(rowcols, col))
 end
 
 """
@@ -196,7 +198,7 @@ function selectby(df::DataFrame, col, col_pairs...;
             push!(get!(colmap, v, Int[]), i)
         end
         map(pairs(colmap)) do (k, v)
-            _select_pivot_unpivot!(select(df, row_id, value_id[v] .=> identity .=> newcols[v]), row_id, cols[row_id], col, k, col_pairs...; pivot, prefix, kwargs...)
+            _select_pivot_unpivot!(select(df, row_id, value_id[v] .=> identity .=> newcols[v]), cols[row_id], col, k, col_pairs...; pivot, prefix, kwargs...)
         end
     else
         pivot = isnothing(pivot) ? false : pivot
@@ -204,7 +206,7 @@ function selectby(df::DataFrame, col, col_pairs...;
         row_id = setdiff(eachindex(cols), value_ids)
         setdiff!(row_id, col_id)
         map(value_ids) do value_id
-            _select_pivot_unpivot!(unstack(df, row_id, col_id, value_id), row_id, cols[row_id], col, cols[value_id], col_pairs...; pivot, prefix, kwargs...)
+            _select_pivot_unpivot!(unstack(df, row_id, col_id, value_id), cols[row_id], col, cols[value_id], col_pairs...; pivot, prefix, kwargs...)
         end
     end
     df = if length(dfs) == 1
@@ -224,8 +226,8 @@ function selectby(df::DataFrame, col, col_pairs...;
     isempty(ord) ? df : sort!(df, ord)
 end
 
-function _select_pivot_unpivot!(df, row_id, row_cols, col, value_name, col_pairs...; pivot = false, prefix = true, kwargs...)
-    select!(df, row_id, col_pairs...; kwargs...)
+function _select_pivot_unpivot!(df, row_cols, col, value_name, col_pairs...; pivot = false, prefix = true, kwargs...)
+    select!(df, row_cols, col_pairs...; kwargs...)
     cols = names(df)
     row_id = findall(in(row_cols), cols)
     col_id = setdiff(eachindex(cols), row_id)
